@@ -2,10 +2,6 @@
 
 # 🧪 SAXSProcessor
 
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![PyFAI](https://img.shields.io/badge/Powered%20by-PyFAI-orange)](https://pyfai.readthedocs.io)
-
 A Python toolkit for processing and analyzing **Small-Angle X-ray Scattering (SAXS)** data from multiple beamlines and detectors — including **ESRF ID02**, **SOLEIL SWING**, and **LGC (EDF format)**.
 
 This package supports:
