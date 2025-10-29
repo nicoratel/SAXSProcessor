@@ -1,4 +1,4 @@
----
+
 
 # 🧪 SAXSProcessor
 
@@ -13,7 +13,7 @@ This package supports:
 * Orientation order parameter determination
 * Batch processing of SAXS datasets
 
----
+
 
 ## 📦 Supported Instruments
 
@@ -23,7 +23,7 @@ This package supports:
 | SOLEIL – SWING | `.h5` or `.nxs` | `h5File_SWING` |
 | LGC            | `.edf`          | `EdfFile`      |
 
----
+
 
 ## 🧩 Class Overview
 
@@ -33,7 +33,7 @@ Handles `.edf` files from LGC.
 Extracts metadata such as wavelength, pixel size, detector center, and sample distance.
 Automatically detects “line eraser” dual-frame files.
 
----
+
 
 ### `h5File_ID02`
 
@@ -43,7 +43,7 @@ Reads **HDF5 data from ESRF ID02** beamline.
 * Loads single or multi-frame data arrays
 * Parses sample name and magnetic field (`B` value)
 
----
+
 
 ### `h5File_SWING`
 
@@ -53,7 +53,7 @@ Reads **SWING beamline data (SOLEIL)**.
 * Averages multiple frames if requested
 * Converts HDF5 datasets to EDF format with `convert2edf()`
 
----
+
 
 ## ⚙️ `SAXSDataProcessor`
 
@@ -82,7 +82,7 @@ SAXSDataProcessor(
 | `binning`    | Downsampling factor                               |
 | `threshold`  | Relative q-value tolerance                        |
 
----
+
 
 ## 🧠 Key Methods
 
@@ -100,7 +100,7 @@ Downsamples image data by block averaging.
 
 Symmetry-based correction of masked pixels (“caving”) using beam center reflection.
 
----
+
 
 ### 📈 Data Extraction
 
@@ -113,7 +113,7 @@ Outputs data in `.dat` format (`chi`, `I(chi)`).
 
 Extracts **radial profiles I(q)** along a specified azimuthal sector.
 
----
+
 
 ### 🔍 Structural Analysis
 
@@ -129,7 +129,7 @@ d = \frac{2\pi}{q_\text{peak}}
 ]
 based on detected peak positions.
 
----
+
 
 ### 📐 Orientation Analysis
 
@@ -151,7 +151,6 @@ Associated functions:
 * `calc_S()` – integrates over P₂ to compute S
 * `pv_nobckgd()`, `P2_nobckgd()` – auxiliary fitting functions
 
----
 
 ### 📉 Power-law Slope
 
@@ -159,7 +158,7 @@ Associated functions:
 
 Fits `I(q)` in log–log space to estimate the scattering **slope exponent**, useful for Porod or fractal regimes.
 
----
+
 
 ### 📊 Profile Plotting
 
@@ -167,7 +166,7 @@ Fits `I(q)` in log–log space to estimate the scattering **slope exponent**, us
 
 Plots azimuthal intensity profiles for all q-values defined in the processor.
 
----
+
 
 ## 🧮 `BatchSAXSDataProcessor`
 
@@ -186,7 +185,7 @@ Outputs:
 * `BatchAzimProfileExtraction.log`
 * 2D image PNGs (`png_images/*.png`)
 
----
+
 
 ## 💾 Typical Output Files
 
@@ -198,7 +197,7 @@ Outputs:
 | `SAXS_processed.csv`             | Summary of all results     |
 | `BatchAzimProfileExtraction.log` | Processing log             |
 
----
+
 
 ## 🚀 Example Usage
 
@@ -221,7 +220,6 @@ S_results = proc.compute_S()
 d_corr = proc.compute_correlation_distance(plot=True)
 ```
 
----
 
 ## 🧭 Batch Processing Example
 
@@ -238,7 +236,6 @@ df = batch.create_dataframe()
 print(df.head())
 ```
 
----
 
 ## 📚 Dependencies
 
@@ -246,6 +243,6 @@ print(df.head())
 * `h5py`, `fabio`, `pyFAI`, `skimage`
 * `ase` (for structural data import)
 
----
+
 
 
