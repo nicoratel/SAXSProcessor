@@ -221,20 +221,6 @@ d_corr = proc.compute_correlation_distance(plot=True)
 ```
 
 
-## 🧭 Batch Processing Example
-
-```python
-from SAXSProcessor import BatchSAXSDataProcessor
-
-batch = BatchSAXSDataProcessor(
-    path="data/ID02/",
-    instrument="ID02",
-    azimqvalues=[0.034, 0.068],
-    mask="mask.edf"
-)
-df = batch.create_dataframe()
-print(df.head())
-```
 
 
 ## 📚 Dependencies
