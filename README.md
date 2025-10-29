@@ -2,7 +2,7 @@
 
 # 🧪 SAXSProcessor
 
-A Python toolkit for processing and analyzing **Small-Angle X-ray Scattering (SAXS)** data from multiple beamlines and detectors — including **ESRF ID02**, **SOLEIL SWING**, and **LGC (EDF format)**.
+A Python toolkit for processing and analyzing Small-Angle X-ray Scattering (SAXS) data from multiple beamlines and detectors — including ESRF ID02, SOLEIL SWING, and LGC (EDF format).
 
 This package supports:
 
@@ -246,9 +246,6 @@ print(df.head())
 * `h5py`, `fabio`, `pyFAI`, `skimage`
 * `ase` (for structural data import)
 
-
-```
-
 ---
 
-Would you like me to **add a short “Quick Start” section** with installation + usage commands (for users cloning this from GitHub)? It would make it look even more polished.
+
