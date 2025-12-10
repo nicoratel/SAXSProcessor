@@ -610,6 +610,7 @@ class BatchNematic:
             Results table
         """
         results = []
+        os.makedirs(self.output_dir, exist_ok=True)
         logfile = os.path.join(self.output_dir, 'batch_processing.log')
         log_lines = []
         
