@@ -77,7 +77,8 @@ def compute_nematic_parameter(
         threshold_ff=threshold,
         plot=plot,
         target=chi,
-        apply_mirror=apply_mirror)
+        apply_mirror=apply_mirror,
+        processor = processor)
     return results["S"], results
 
 def sort_h5(file):
