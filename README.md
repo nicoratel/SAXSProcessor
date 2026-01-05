@@ -1,8 +1,9 @@
 # SAXS Analysis Toolkit
 
-This repository contains three complementary Python modules designed for Small-Angle X-ray Scattering (SAXS) data analysis.  
+This repository contains complementary Python modules designed for Small-Angle X-ray Scattering (SAXS) data analysis.  
 Together, they provide tools for detector-corrected preprocessing, azimuthal/radial integration, nematic order parameter extraction, and correlation distance analysis.
 
+### Note to the user: The library is designed to unwrap images contained in a h5 file, and to average them. In case you do not wish to average your data (e.g. spatial scans), please refer to µSAXS case, described in Workflow_microSAXS.ipynb.
 ---
 
 # Module Overview
@@ -22,6 +23,9 @@ It handles:
   - Radial profiles within specific azimuthal sectors.
 - Export of SasView-compatible 2D ASCII files.
 - Computation of full Qx, Qy, Qz detector grids based on geometry.
+
+
+
 
 ### Main Methods
 - `export_sasview()`
@@ -91,40 +95,5 @@ High-level batch processor:
 
 ---
 
-# Typical Workflow
 
-## 1. Load a SAXS Image
-```python
-from saxsprocessor import SAXSProcessor
-processor = SAXSProcessor("image.h5", instrument="ID02", mask="mask.edf")
-```
-## 2. Extract azimuthal and radial profiles
-```
-chi, Ichi = processor.extract_azimuthal_profile(qvalue=0.03)
-q, Iq = processor.extract_radial_profile(azimuth=90)
-```
-## 3. Nematic Order parameter calculation
-```
-from nematicordercalculator import CylinderFormFactor,NematicOrderCalculator
-
-# Form factor Calculation
-form_factor = CylinderFormFactor(
-    processor=processor, 
-    radius=78,
-    L=840,
-    theta=90,
-    phi=0.4,
-    radius_pd=0.3,
-    L_pd=0.75,
-    phi_pd=0,
-    theta_pd=0,
-    background=0.00001,
-    scale=1,
-    plot = True
-    )
-
-# Nematic order paramter calculation
-nematic_calc = NematicOrderCalculator(form_factor=form_factor)
-results = nematic_calc.fit_azimuthal_profile(chi, Ichi, qvalue_ff=0.03)
-```
 
