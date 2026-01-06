@@ -11,7 +11,7 @@ import math
 from pathlib import Path
 
 from scipy.interpolate import interp1d, griddata
-
+from scipy.signal import savgol_filter
 import pandas as pd
 
 # PyFAI imports
@@ -519,5 +519,10 @@ class SAXSProcessor:
 
     def find_main_orientation(self, qvalue=0.01, threshold=0.05):
         chi, I = self.extract_azimuthal_profile(qvalue=qvalue, threshold=threshold)
-        angle = chi[np.argmax(I)] % 180
-        return min(angle, 180 - angle)
+        # apply savgol filter to I and remove zeros
+        I = savgol_filter(I,9,2)
+        # filtrer les points à intensité nulle
+        mask = (I > 0) & (chi > -90) & (chi < 90) 
+        chi = chi[mask]; I = I[mask]
+        angle = chi[np.argmax(I)]
+        return angle
