@@ -69,12 +69,18 @@ class EdfFile:
 
         
     def _get_individual_files_lineEraser(self, file):
-        directory = os.path.dirname(file)
-        filename = file.split('/')[-1].split('.')[0]
-        prefix = filename.split('_')[0] + '_0'
-        filenumbers = filename.split('_')[3]
-        file1 = f'{directory}/{prefix}_{int(filenumbers.split("-")[0]):05d}.edf'
-        file2 = f'{directory}/{prefix}_{int(filenumbers.split("-")[1]):05d}.edf'
+        directory, basename = os.path.split(file)
+        filename, _ = os.path.splitext(basename)
+
+        try:
+            prefix, filenumbers = re.split(r'_vd_', filename, maxsplit=1)
+            n1, n2 = map(int, filenumbers.split('-'))
+        except ValueError as e:
+            raise ValueError(f"Invalid filename format: {basename}") from e
+
+        file1 = os.path.join(directory, f"{prefix}_{n1:05d}.edf")
+        file2 = os.path.join(directory, f"{prefix}_{n2:05d}.edf")
+
         return file1, file2
     
     def _extract_B_value(self):
