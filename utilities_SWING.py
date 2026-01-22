@@ -14,8 +14,6 @@ import multiprocessing
 from joblib import Parallel, delayed
 
 
-
-
 #####################################################################################################################
 
         # FUNCTIONS DEDICATED TO THE WORKFLOW FOR MICRO-SAXS DATA PROCESSING
@@ -23,6 +21,245 @@ from joblib import Parallel, delayed
 # a single file corresponds to a linescan along x (multiple frames along x for a given z position)
 
 #####################################################################################################################
+
+
+
+def view_position_grid(
+    data_folder: str,
+    prefix: str = 'lacroix',
+    basler_coords: tuple = (186, 309),
+    basler_calibration: tuple = (3.7, 3.7),
+    reference_file: str = None,
+    marker_size: float = 3,
+    marker_color: str = 'yellow',
+    marker_style: str = 'o',
+    figsize: tuple = (12, 12),
+    cmap: str = 'gray',
+    contrast_adjust: bool = False,
+    contrast_percentiles: tuple = (5, 95),
+    plot: bool = True,
+    save_image: bool = False,
+    output_filename: str = None,
+    verbose: bool = True
+):
+    """
+    Visualize all acquisition positions on a Basler reference image.
+    
+    Parameters
+    ----------
+    data_folder : str
+        Path to folder containing HDF5 files    basler_coords : tuple
+        Reference position (x, y) in pixels on Basler image
+    basler_calibration : tuple
+        Calibration in µm/pixel (x, z)
+    prefix : str
+        Prefix for file selection (default: 'lacroix'). Files matching '{prefix}_*.h5' will be processed
+    reference_file : str, optional
+        Path to specific reference file. If None, uses first file
+    marker_size : float
+        Size of position markers (default: 3)
+    marker_color : str
+        Color of position markers (default: 'yellow')
+    marker_style : str
+        Matplotlib marker style (default: 'o')
+    figsize : tuple
+        Figure size in inches (default: (12, 12))
+    cmap : str
+        Colormap for Basler image (default: 'gray')
+    contrast_adjust : bool
+        Apply contrast adjustment using percentiles (default: False)
+    contrast_percentiles : tuple
+        Percentiles for contrast adjustment (default: (5, 95))
+    plot : bool
+        Display the plot (default: True)
+    save_image : bool
+        Save the figure to file (default: False)
+    output_filename : str, optional
+        Custom output filename. If None, auto-generates name
+    verbose : bool
+        Print detailed information (default: True)
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'positions_x': list of x positions in pixels
+        - 'positions_z': list of z positions in pixels
+        - 'file_numbers': list of file numbers
+        - 'total_frames': total number of frames processed
+        - 'figure': matplotlib figure object (if plot=True)
+        - 'stats': dictionary with position statistics
+    """    
+    # Find all files
+    file_pattern = f'{prefix}_*.h5'
+    all_files = sorted(glob.glob(os.path.join(data_folder, file_pattern)))
+    
+    if len(all_files) == 0:
+        raise FileNotFoundError(f"No files found matching pattern '{file_pattern}' in {data_folder}")
+    
+    if verbose:
+        print(f"{'='*60}")
+        print(f"VIEW POSITION GRID")
+        print(f"{'='*60}")
+        print(f"Data folder: {data_folder}")
+        print(f"Prefix: {prefix}")
+        print(f"File pattern: {file_pattern}")
+        print(f"Files found: {len(all_files)}")
+    
+    # Load reference Basler image
+    if reference_file is None:
+        reference_file = all_files[0]
+    
+    if verbose:
+        print(f"\nReference file: {os.path.basename(reference_file)}")
+    
+    swing_ref = h5File_SWING(file=reference_file, mean=True)
+    basler_ref = swing_ref.basler_image
+    
+    # Extract positions from all files and frames
+    positions_x = []
+    positions_z = []
+    file_numbers = []
+    
+    x_ref_mm = swing_ref.position_x_start[0]
+    z_ref_mm = swing_ref.position_z_start[0]
+    
+    if verbose:
+        print(f"\nReference position: X={x_ref_mm:.4f} mm, Z={z_ref_mm:.4f} mm")
+        print(f"Basler calibration: {basler_calibration[0]} µm/pixel, {basler_calibration[1]} µm/pixel")
+        print(f"Basler reference coords: {basler_coords}")
+        print(f"\nExtracting positions from all frames...")
+    
+    total_frames = 0
+    for i, file in enumerate(all_files):
+        try:
+            # Load without averaging to get frame count
+            swing = h5File_SWING(file=file, mean=False)
+            nb_frames = swing.nb_frames
+            
+            # Start and end positions
+            x_start = swing.position_x_start[0]
+            z_start = swing.position_z_start[0]
+            x_end = swing.position_x_end[0]
+            z_end = swing.position_z_end[0]
+            
+            # Calculate step per frame (in mm)
+            step_x_mm = (x_end - x_start) / nb_frames if nb_frames > 1 else 0
+            step_z_mm = (z_end - z_start) / nb_frames if nb_frames > 1 else 0
+            
+            # Process each frame
+            for frame_idx in range(nb_frames):
+                # Position of this frame
+                x_pos = x_start + frame_idx * step_x_mm
+                z_pos = z_start + frame_idx * step_z_mm
+                
+                # Calculate displacement from reference (mm)
+                delta_x_mm = x_pos - x_ref_mm
+                delta_z_mm = z_pos - z_ref_mm
+                
+                # Convert to pixels: mm -> µm -> pixels
+                delta_x_pixels = (delta_x_mm * 1000) / basler_calibration[0]
+                delta_z_pixels = (delta_z_mm * 1000) / basler_calibration[1]
+                
+                # Calculate position in pixels on Basler image
+                x_pixel = basler_coords[0] + int(delta_x_pixels)
+                z_pixel = basler_coords[1] + int(delta_z_pixels)
+                
+                positions_x.append(x_pixel)
+                positions_z.append(z_pixel)
+                file_numbers.append(swing.file_number)
+                
+                total_frames += 1
+                
+                # Display some examples
+                if verbose and ((i < 2 and frame_idx < 3) or (i >= len(all_files) - 1 and frame_idx < 3)):
+                    print(f"  File #{swing.file_number}, frame {frame_idx}: "
+                          f"X={x_pos:.4f} mm, Z={z_pos:.4f} mm | Pixel=({x_pixel}, {z_pixel})")
+            
+            if verbose and i == 2:
+                print(f"  ...")
+                
+        except Exception as e:
+            print(f"  Error with {os.path.basename(file)}: {e}")
+    
+    # Calculate statistics
+    stats = {
+        'x_min': min(positions_x),
+        'x_max': max(positions_x),
+        'x_range': max(positions_x) - min(positions_x),
+        'z_min': min(positions_z),
+        'z_max': max(positions_z),
+        'z_range': max(positions_z) - min(positions_z),
+        'total_points': len(positions_x),
+        'file_range': (min(file_numbers), max(file_numbers))
+    }
+    
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"STATISTICS")
+        print(f"{'='*60}")
+        print(f"Total positions extracted: {stats['total_points']} ({total_frames} frames)")
+        print(f"Position X: min={stats['x_min']}, max={stats['x_max']}, range={stats['x_range']} px")
+        print(f"Position Z: min={stats['z_min']}, max={stats['z_max']}, range={stats['z_range']} px")
+        print(f"File numbers: #{stats['file_range'][0]} to #{stats['file_range'][1]}")
+        print(f"{'='*60}")
+    
+    # Create figure
+    fig = None
+    if plot or save_image:
+        fig = plt.figure(figsize=figsize)
+        
+        # Apply contrast adjustment if requested
+        if contrast_adjust:
+            vmin = np.percentile(basler_ref, contrast_percentiles[0])
+            vmax = np.percentile(basler_ref, contrast_percentiles[1])
+            plt.imshow(basler_ref, cmap=cmap, vmin=vmin, vmax=vmax)
+        else:
+            plt.imshow(basler_ref, cmap=cmap)
+        
+        # Plot all positions
+        plt.plot(positions_x, positions_z, 
+                marker=marker_style, 
+                color=marker_color, 
+                markersize=marker_size, 
+                markeredgewidth=0,
+                linestyle='none')
+        
+        plt.title(f'Position Grid Mapping\n'
+                  f'Reference: {swing_ref.samplename} (#{swing_ref.file_number})\n'
+                  f'{stats["total_points"]} positions')
+        plt.xlabel('Pixel X')
+        plt.ylabel('Pixel Y')
+        plt.tight_layout()
+        
+        # Save if requested
+        if save_image:
+            if output_filename is None:
+                output_filename = os.path.join(
+                    data_folder, 
+                    f"position_grid_{swing_ref.samplename}.png"
+                )
+            fig.savefig(output_filename, dpi=300, bbox_inches='tight')
+            if verbose:
+                print(f"\nImage saved: {output_filename}")
+        
+        # Show if requested
+        if plot:
+            plt.show()
+        else:
+            plt.close(fig)
+    
+    # Return results
+    return {
+        'positions_x': positions_x,
+        'positions_z': positions_z,
+        'file_numbers': file_numbers,
+        'total_frames': total_frames,
+        'figure': fig,
+        'stats': stats,
+        'reference_image': basler_ref,
+        'reference_sample': swing_ref.samplename
+    }
 
 
 def sort_h5(file, prefix='lacroix'):
