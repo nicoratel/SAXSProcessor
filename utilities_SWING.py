@@ -525,3 +525,167 @@ def compute_global_nematic_parameter(
     )
     print(f'The global nematic order parameter is S={S:.4f}')
     return S
+
+def compute_nematic_parameter_linescan_SWING(
+    h5file,
+    reference_file=None,
+    k=1,
+    autosubstract=True,
+    mask=None,
+    qvalue=0.034,
+    threshold=0.05,
+    radius=78,
+    L=840,
+    radius_pd=0.3,
+    L_pd=0.75,
+    plot=True,
+    apply_mirror=False,
+    verbose=True
+):
+    """
+    SAXS linescan processing with nematic order parameter computation for a single h5 file
+    (PARALLELIZED VERSION)
+    
+    Parameters
+    ----------
+    h5file : str
+        Path to the single h5 file containing the linescan data
+    ... (autres paramètres identiques à compute_nematic_order_assembly_SWING)
+    
+    Returns
+    -------
+    x_array : ndarray
+        X positions
+    z_array : ndarray
+        Z positions (constant for a linescan)
+    orientation_array : ndarray
+        Orientation angles
+    S_array : ndarray
+        Nematic order parameters
+    R2_array : ndarray
+        R² values
+    df : DataFrame
+        Complete results as DataFrame
+    """
+    
+    def log_step(step, total, message):
+        clear_output(wait=True)
+        display(Markdown(f"### Step {step}/{total}\n**{message}**"))
+    
+    print("⚠️ WARNING: Processing single linescan file")
+    
+    # === STEP 1: Vérifier le fichier h5
+    log_step(1, 6, "Checking h5 file")
+    if not os.path.exists(h5file):
+        raise FileNotFoundError(f"File not found: {h5file}")
+    
+    # === STEP 2: h5 → EDF
+    log_step(2, 6, "Extracting frames and converting to EDF files")
+    h5dir = os.path.dirname(h5file)
+    edfpath = os.path.join(h5dir, 'edf_files_linescan')
+    os.makedirs(edfpath, exist_ok=True)
+    
+    SWING_file = h5File_SWING(h5file, mean=False)
+    SWING_file.convert2edf(outputdir=edfpath)
+    
+    # === STEP 3: Geometry (1 ligne × N colonnes)
+    log_step(3, 6, "Determining scan geometry")
+    number_of_columns = SWING_file.nb_frames
+    number_of_lines = 1
+    
+    # === STEP 4: EDF list
+    log_step(4, 6, "Building EDF file list")
+    edf_filelist = sorted(
+        glob.glob(os.path.join(edfpath, '*Img*.edf')),
+        key=sort_edf
+    )
+    
+    # === STEP 5: Parallel nematic computation
+    log_step(5, 6, "Computing nematic order parameter (parallel)")
+    
+    nfiles = len(edf_filelist)
+    
+    x_array = np.zeros(nfiles)
+    z_array = np.zeros(nfiles)
+    orientation_array = np.zeros(nfiles)
+    S_array = np.zeros(nfiles)
+    R2_array = np.zeros(nfiles)
+    data_list = []
+    
+    n_jobs = max(1, multiprocessing.cpu_count() - 1)
+    
+    results = Parallel(
+        n_jobs=n_jobs,
+        backend="loky",
+        verbose=10
+    )(
+        delayed(_process_one_edf)(
+            i,
+            file,
+            reference_file,
+            k,
+            autosubstract,
+            mask,
+            qvalue,
+            threshold,
+            radius,
+            L,
+            radius_pd,
+            L_pd,
+            apply_mirror,
+            verbose
+        )
+        for i, file in enumerate(edf_filelist)
+    )
+    
+    for i, x, z, orientation, S, R2, row_data in results:
+        x_array[i] = x
+        z_array[i] = z
+        orientation_array[i] = orientation
+        S_array[i] = S
+        R2_array[i] = R2
+        data_list.append(row_data)
+    
+    # === STEP 6: CSV export et visualisation
+    log_step(6, 6, "Exporting results and generating plots")
+    df = pd.DataFrame(data_list)
+    
+    outputpath = os.path.join(h5dir, 'nematic_linescan_results')
+    os.makedirs(outputpath, exist_ok=True)
+    
+    csv_filename = os.path.join(outputpath, 'nematic_order_linescan.csv')
+    df.to_csv(csv_filename, index=False)
+    
+    if plot:
+        # Plot simple: S(x) avec flèches d'orientation
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Tracer S(x)
+        ax.plot(x_array, S_array, 'o-', linewidth=2, markersize=8, color='blue', label='S')
+        
+        # Ajouter les flèches d'orientation à chaque point
+        u = np.cos(np.radians(orientation_array))
+        v = np.sin(np.radians(orientation_array))
+        
+        # Échelle des flèches proportionnelle à la plage de S
+        S_range = S_array.max() - S_array.min()
+        arrow_scale = S_range * 0.15 if S_range > 0 else 0.1
+        
+        ax.quiver(x_array, S_array, u, v, 
+                  color='black',scale=15,width=0.005,alpha=0.8,headwidth=3,headlength=4, label='Orientation')
+        
+        ax.set_xlabel('X position (mm)', fontsize=12)
+        ax.set_ylabel('Nematic order parameter S', fontsize=12)
+        ax.set_title('Nematic order parameter and orientation along linescan', fontsize=14)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(outputpath, 'nematic_linescan_profile.png'), dpi=150)
+        plt.show()
+    
+    print(f"\n✓ Processing complete!")
+    print(f"  - Results saved to: {csv_filename}")
+    print(f"  - Number of points: {nfiles}")
+    
+    return x_array, z_array, orientation_array, S_array, R2_array, df
