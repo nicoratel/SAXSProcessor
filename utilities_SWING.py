@@ -91,6 +91,8 @@ def view_position_grid(
         - 'stats': dictionary with position statistics
     """    
     # Find all files
+    #file_pattern = f'{prefix}_*.h5'
+    #all_files = sorted(glob.glob(os.path.join(data_folder, file_pattern)))
     file_pattern = f'{prefix}_*.h5'
     all_files = sorted(
         glob.glob(os.path.join(data_folder, file_pattern)),
@@ -693,6 +695,83 @@ def plot_transmission_map(h5path,prefix='lacroix'):
     figname = os.path.join(h5path, 'transmission_map.png')
     plt.savefig(figname, dpi=300, bbox_inches='tight')
 
+def average_h5_intensity(
+        h5path,
+        prefix='lacroix',
+        reference_file=None,
+        k=1,
+        autosubstract=True,
+        mask=None,
+        verbose=True):
+    """
+    Calculate average SAXS intensity from multiple h5 files.
+    
+    This function loads all h5 files matching a prefix pattern, extracts the 
+    scattering intensity from each file, and computes the mean intensity across 
+    all files.
+    
+    Parameters
+    ----------
+    h5path : str
+        Path to folder containing h5 files
+    prefix : str
+        h5 file prefix (default: 'lacroix')
+    reference_file : str, optional
+        Path to h5 file for reference measurement (default: None)
+    k : float
+        Coefficient for reference subtraction (default: 1)
+    autosubstract : bool
+        Use optimized reference subtraction (default: True)
+    mask : str, optional
+        Path to mask file
+    verbose : bool
+        Print progress information (default: True)
+    
+    Returns
+    -------
+    mean_intensity : ndarray
+        Average intensity across all files
+    nb_files : int
+        Number of files processed
+    """
+    # 1. Create h5_file list
+    h5_filelist = sorted(
+        glob.glob(os.path.join(h5path, '*.h5')),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
+    nb_files = len(h5_filelist)
+    
+    if nb_files == 0:
+        raise FileNotFoundError(f"No h5 files found with prefix '{prefix}' in {h5path}")
+    
+    if verbose:
+        print(f"Computing average intensity from {nb_files} files...")
+    
+    # 2. Retrieve mean intensity in each file
+    total_intensity = 0
+    for i, file in enumerate(h5_filelist):
+        if verbose:
+            print(f'  Processing [{i+1}/{nb_files}]: {os.path.basename(file)}')
+        
+        proc = SAXSProcessor(
+            file,
+            instrument='SWING',
+            reference_file=reference_file,
+            k=k,
+            autosubstract=autosubstract,
+            mask=mask,
+        )
+        total_intensity += proc.data
+    
+    # 3. Calculate mean intensity
+    mean_intensity = total_intensity / nb_files
+    
+    if verbose:
+        print(f"✓ Average intensity computed from {nb_files} files")
+    
+    return mean_intensity, nb_files
+
+
 def compute_global_nematic_parameter(
         h5path,
         prefix='lacroix',
@@ -710,7 +789,7 @@ def compute_global_nematic_parameter(
         apply_mirror=False,
         verbose=True):
     """
-    Compute_global_nematic_parameter for average intensity measured in an assembly
+    Compute global nematic parameter for average intensity measured in an assembly
     
     :param h5path: str path to folder containing h5 files
     :param prefix: str prefix for h5files (default = 'lacroix')
@@ -729,41 +808,53 @@ def compute_global_nematic_parameter(
     :param verbose: bool print outputs
     """
     
-    # 1. Create h5_file list
+    # 1. Calculate average intensity from all h5 files
+    mean_intensity, nb_files = average_h5_intensity(
+        h5path=h5path,
+        prefix=prefix,
+        reference_file=reference_file,
+        k=k,
+        autosubstract=autosubstract,
+        mask=mask,
+        verbose=verbose
+    )
+    
+    # 2. Create a dummy SAXSProcessor instance with averaged data
+    # Load first file to get proper metadata/geometry
     h5_filelist = sorted(
         glob.glob(os.path.join(h5path, '*.h5')),
         key=lambda f: sort_h5(f, prefix=prefix)
     )
-    nb_files = len(h5_filelist)
-    # 2. Retrieve mean intensity in each file
-    total_intensity = 0
-    for file in h5_filelist:
-        print(f'Processing {file}')
-        proc = SAXSProcessor(file,
-                             instrument='SWING',
-                             reference_file = reference_file,
-                             k = k,
-                             autosubstract = autosubstract,
-                             mask = mask,                          
-                             )
-        total_intensity += proc.data
-    # 3. Calculate mean intensity
-    mean_intensity = total_intensity / nb_files
-    # Assign mean intensity to SAXSProcessor instance
-    proc.data = mean_intensity
-    S, mean_angle, dict = compute_nematic_parameter(
-        processor = proc,
-        qvalue = qvalue,
-        threshold = threshold,
-        radius = radius,
-        L = L,
-        radius_pd = radius_pd,
-        L_pd= L_pd,
-        plot = plot,
-        apply_mirror = apply_mirror,
-        verbose = verbose
+    proc = SAXSProcessor(
+        h5_filelist[0],
+        instrument='SWING',
+        reference_file=reference_file,
+        k=k,
+        autosubstract=autosubstract,
+        mask=mask,
     )
-    print(f'The global nematic order parameter is S={S:.4f}')
+    # Override with mean intensity
+    proc.data = mean_intensity
+    
+    # 3. Compute nematic parameter on averaged intensity
+    S, mean_angle, dict = compute_nematic_parameter(
+        processor=proc,
+        qvalue=qvalue,
+        threshold=threshold,
+        radius=radius,
+        L=L,
+        radius_pd=radius_pd,
+        L_pd=L_pd,
+        plot=plot,
+        apply_mirror=apply_mirror,
+        verbose=verbose
+    )
+    
+    if verbose:
+        print(f'\n{"="*60}')
+        print(f'The global nematic order parameter is S={S:.4f}')
+        print(f'{"="*60}')
+    
     return S
 
 def compute_nematic_parameter_linescan_SWING(
