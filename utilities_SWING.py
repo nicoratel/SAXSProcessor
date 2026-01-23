@@ -92,7 +92,10 @@ def view_position_grid(
     """    
     # Find all files
     file_pattern = f'{prefix}_*.h5'
-    all_files = sorted(glob.glob(os.path.join(data_folder, file_pattern)))
+    all_files = sorted(
+        glob.glob(os.path.join(data_folder, file_pattern)),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
     
     if len(all_files) == 0:
         raise FileNotFoundError(f"No files found matching pattern '{file_pattern}' in {data_folder}")
