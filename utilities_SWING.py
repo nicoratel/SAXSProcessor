@@ -12,6 +12,8 @@ from scipy.interpolate import griddata
 from utilities import compute_nematic_parameter
 import multiprocessing
 from joblib import Parallel, delayed
+import ast
+from correlationdistancecalculator import CorrelationDistanceCalculator
 
 
 #####################################################################################################################
@@ -1020,3 +1022,110 @@ def compute_nematic_parameter_linescan_SWING(
     print(f"  - Number of points: {nfiles}")
     
     return x_array, z_array, orientation_array, S_array, R2_array, df
+
+
+def extract_relevant_azimuthal_profiles(h5path,
+                                        prefix='lacroix',
+                                        reference_file=None,
+                                        autosubstract=True,
+                                        k=1,
+                                        mask=None, 
+                                        threshold = 0.005,                                       
+                                        plot=True,
+                                        output_dir=None,
+                                        verbose=True,
+                                        manual_input=False):
+    """
+    Extract and plot relevant azimuthal profiles from SWING h5 files in a given directory.
+
+    This functions wraps up the following steps:
+    - Load all h5 files matching
+    - Average data
+    - extract radial profile and find peaks
+    - extract relevant azimuthal profiles at predetermined q values (peak positions)
+
+    Parameters:
+    ----------
+    h5path : str
+        Path to folder containing h5 files
+    prefix : str
+        h5 file prefix (default: 'lacroix')
+    reference_file : str, optional
+        Path to h5 file for reference measurement (default: None)
+    autosubstract : bool
+        Use optimized reference subtraction (default: True)
+    k : float
+        Coefficient for reference subtraction (default: 1)
+    mask : str, optional
+        Path to mask file
+    threshold : float
+        Width of tolerance for azimuthal profile extraction (%q)
+    plot : bool
+        Whether to plot the azimuthal profiles (default: True)
+    output_dir : str, optional
+        Directory to save plots 
+    verbose : bool
+        Print progress information (default: True)
+    manual_input : bool
+        If True, allows manual input of q values instead of automatic peak detection (default: False)
+    """
+    # 1. Create h5_file list
+    h5_filelist = sorted(
+        glob.glob(os.path.join(h5path, '*.h5')),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
+    nb_files = len(h5_filelist) 
+    if nb_files == 0:
+        raise FileNotFoundError(f"No h5 files found with prefix '{prefix}' in {h5path}")
+    if verbose:
+        print(f"Processing {nb_files} files for azimuthal profile extraction...")
+    
+    # 2. Compute mean intensity
+    mean_intensity, _ = average_h5_intensity(
+        h5path,
+        prefix=prefix,
+        reference_file=reference_file,
+        autosubstract=autosubstract,
+        mask=mask,
+        k=k,
+        verbose=verbose
+    )
+
+    # 3. Create SAXSProcessor instance with mean intensity
+    proc = SAXSProcessor(
+        file = h5_filelist[0],  # Dummy file, we will override data
+        instrument='SWING',
+        reference_file=reference_file,
+        k=k,
+        autosubstract=autosubstract,
+        mask=mask)
+    proc.data = mean_intensity
+    
+    # 4. Extract radial profile and find peaks
+    q, I = proc.extract_radial_profile(width= 360)
+    corr = CorrelationDistanceCalculator(proc)
+    peaklist = corr.detect_peaks(q, I,plot=True)
+    if manual_input:
+        default = peaklist        
+        raw = input(f"List of q peaks {default} : ") or str(default)
+        peaklist = ast.literal_eval(raw)
+
+    # 5. Extract relevant azimuthal profiles
+    if plot:
+            plt.figure(figsize=(8,5))
+    for q in peaklist:
+        phi, I_azim = proc.extract_azimuthal_profile(qvalue=q, threshold=threshold)
+        if plot:            
+            plt.semilogy(phi, I_azim, label=f'q={q:.4f} Å⁻¹')
+    if plot:
+        plt.xlabel('Azimuthal angle (°)')
+        plt.ylabel('Intensity (a.u.)')
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
+            plt.savefig(os.path.join(output_dir, f'azimuthal_profile_q_{q:.4f}.png'), dpi=150)
+        plt.show()
+    #6. Make 2dplot to double check
+    proc.plot2d_vsq(q_circles=peaklist)
