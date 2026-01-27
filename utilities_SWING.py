@@ -1091,6 +1091,7 @@ def extract_relevant_azimuthal_profiles(h5path,
                                         plot=True,
                                         output_dir=None,
                                         verbose=True,
+                                        apply_mirror=True,
                                         manual_input=False):
     """
     Extract and plot relevant azimuthal profiles from SWING h5 files in a given directory.
@@ -1123,6 +1124,8 @@ def extract_relevant_azimuthal_profiles(h5path,
         Directory to save plots 
     verbose : bool
         Print progress information (default: True)
+    apply_mirror : bool
+        Apply mirror symmetry to complete incomplete azimuthal profiles (default: True)
     manual_input : bool
         If True, allows manual input of q values instead of automatic peak detection (default: False)
     """
@@ -1149,7 +1152,7 @@ def extract_relevant_azimuthal_profiles(h5path,
     if plot:
             plt.figure(figsize=(8,5))
     for q in peaklist:
-        phi, I_azim = proc.extract_azimuthal_profile(qvalue=q, threshold=threshold)
+        phi, I_azim = proc.extract_azimuthal_profile(qvalue=q, threshold=threshold,apply_mirror = apply_mirror)
         if plot:            
             plt.semilogy(phi, I_azim, label=f'q={q:.4f} Å⁻¹')
     if plot:
