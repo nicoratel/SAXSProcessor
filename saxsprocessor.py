@@ -459,11 +459,40 @@ class SAXSProcessor:
         # Affichage dans le notebook
         plt.show()
         
-    
+    @staticmethod
+    def mirror_profile(theta_exp, I_exp, center=180):
+        """
+        Génère un profil azimutal symétrique sans interpolation,
+        angles dans [-180°, 180°].
+        """
+        theta_exp = np.array(theta_exp)
+        I_exp = np.array(I_exp)
+        """
+        # --- Détecter le pic principal ---
+        peaks, _ = find_peaks(I_exp, height=0)
+        if len(peaks) == 0:
+            raise ValueError("Aucun pic détecté.")
+        
+        main_peak = peaks[np.argmax(I_exp[peaks])]
+        x0 = theta_exp[main_peak]
+        """
+        # --- Calculer les angles miroir ---
+        theta_mirror_array = (2*center - theta_exp) % 360
+        I_mirror_array = I_exp.copy()  # intensité identique
+        
+        # --- Fusionner ---
+        theta_aug = np.concatenate([theta_exp, theta_mirror_array])
+        I_aug = np.concatenate([I_exp, I_mirror_array])
+        
+        # --- Mapper dans [-180, 180] et trier ---
+        theta_aug = ((theta_aug + 180) % 360) - 180
+        sort_idx = np.argsort(theta_aug)
+        
+        return theta_aug[sort_idx], I_aug[sort_idx]    
     
     
 
-    def extract_azimuthal_profile(self, qvalue, threshold = 0.0001, save=True,output_dir=None):
+    def extract_azimuthal_profile(self, qvalue, threshold = 0.0001, save=True,output_dir=None,apply_mirror=False):
         """
         Extract the azimuthal intensity profile at a given Q value using pyFAI.
 
@@ -500,6 +529,9 @@ class SAXSProcessor:
             radial_unit="q_A^-1",
             method=("no", "histogram", "cython")
         )
+
+        if apply_mirror:
+            chi, I = self.mirror_profile(chi, I, center=180)
         
         if save:
             if output_dir is None:
