@@ -774,6 +774,81 @@ def average_h5_intensity(
     return mean_intensity, nb_files
 
 
+def average_h5_processor(
+        h5path,
+        prefix='lacroix',
+        reference_file=None,
+        k=1,
+        autosubstract=True,
+        mask=None,
+        verbose=True):
+    """
+    Calculate average SAXS intensity from multiple h5 files.
+    
+    This function loads all h5 files matching a prefix pattern, extracts the 
+    scattering intensity from each file, and computes the mean intensity across 
+    all files.
+    
+    Parameters
+    ----------
+    h5path : str
+        Path to folder containing h5 files
+    prefix : str
+        h5 file prefix (default: 'lacroix')
+    reference_file : str, optional
+        Path to h5 file for reference measurement (default: None)
+    k : float
+        Coefficient for reference subtraction (default: 1)
+    autosubstract : bool
+        Use optimized reference subtraction (default: True)
+    mask : str, optional
+        Path to mask file
+    verbose : bool
+        Print progress information (default: True)
+    
+    Returns
+    -------
+    SAXSProcessor
+        SAXSProcessor instance with average intensity data
+    """
+
+       # 1. Create h5_file list
+    h5_filelist = sorted(
+        glob.glob(os.path.join(h5path, '*.h5')),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
+    nb_files = len(h5_filelist)
+
+    # 2. Retrieve mean intensity in each file
+    total_intensity = 0
+    for file in h5_filelist:
+        print(f'Processing {file}')
+        proc = SAXSProcessor(file,
+                             instrument='SWING',
+                             reference_file = reference_file,
+                             k = k,
+                             autosubstract = autosubstract,
+                             mask = mask,                          
+                             )
+        total_intensity += proc.data
+    # 3. Calculate mean intensity
+    mean_intensity = total_intensity / nb_files
+    
+    if verbose:
+        print(f"✓ Average intensity computed from {nb_files} files")
+
+    proc = SAXSProcessor(h5_filelist[0],
+                         instrument='SWING',
+                         reference_file = reference_file,
+                         k = k,
+                         autosubstract = autosubstract,
+                         mask = mask,                          
+                         )
+    proc.data = mean_intensity
+    
+    return proc
+
+
 def compute_global_nematic_parameter(
         h5path,
         prefix='lacroix',
@@ -810,8 +885,7 @@ def compute_global_nematic_parameter(
     :param verbose: bool print outputs
     """
     
-    # 1. Calculate average intensity from all h5 files
-    mean_intensity, nb_files = average_h5_intensity(
+    proc = average_h5_processor(
         h5path=h5path,
         prefix=prefix,
         reference_file=reference_file,
@@ -820,23 +894,6 @@ def compute_global_nematic_parameter(
         mask=mask,
         verbose=verbose
     )
-    
-    # 2. Create a dummy SAXSProcessor instance with averaged data
-    # Load first file to get proper metadata/geometry
-    h5_filelist = sorted(
-        glob.glob(os.path.join(h5path, '*.h5')),
-        key=lambda f: sort_h5(f, prefix=prefix)
-    )
-    proc = SAXSProcessor(
-        h5_filelist[0],
-        instrument='SWING',
-        reference_file=reference_file,
-        k=k,
-        autosubstract=autosubstract,
-        mask=mask,
-    )
-    # Override with mean intensity
-    proc.data = mean_intensity
     
     # 3. Compute nematic parameter on averaged intensity
     S, mean_angle, dict = compute_nematic_parameter(
@@ -1069,37 +1126,15 @@ def extract_relevant_azimuthal_profiles(h5path,
     manual_input : bool
         If True, allows manual input of q values instead of automatic peak detection (default: False)
     """
-    # 1. Create h5_file list
-    h5_filelist = sorted(
-        glob.glob(os.path.join(h5path, '*.h5')),
-        key=lambda f: sort_h5(f, prefix=prefix)
-    )
-    nb_files = len(h5_filelist) 
-    if nb_files == 0:
-        raise FileNotFoundError(f"No h5 files found with prefix '{prefix}' in {h5path}")
-    if verbose:
-        print(f"Processing {nb_files} files for azimuthal profile extraction...")
-    
-    # 2. Compute mean intensity
-    mean_intensity, _ = average_h5_intensity(
-        h5path,
+   proc = average_h5_processor(
+        h5path=h5path,
         prefix=prefix,
         reference_file=reference_file,
+        k=k,
         autosubstract=autosubstract,
         mask=mask,
-        k=k,
         verbose=verbose
     )
-
-    # 3. Create SAXSProcessor instance with mean intensity
-    proc = SAXSProcessor(
-        file = h5_filelist[0],  # Dummy file, we will override data
-        instrument='SWING',
-        reference_file=reference_file,
-        k=k,
-        autosubstract=autosubstract,
-        mask=mask)
-    proc.data = mean_intensity
     
     # 4. Extract radial profile and find peaks
     q, I = proc.extract_radial_profile(width= 360)
