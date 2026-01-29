@@ -1205,7 +1205,7 @@ def save_azimuthal_profiles_to_csv(
     # Fonction pour arrondir les angles
     def round_angle_to_nominal(angle, tolerance=5.0):
         """Arrondit l'angle aux valeurs nominales (0°, 45°, 90°) si proche de ±tolerance"""
-        nominal_angles = [-180,-135, -90, 45, 0, 45, 90, 135, 180]
+        nominal_angles = [-180,-135, -90, -45, 0, 45, 90, 135, 180]
         for nominal in nominal_angles:
             if abs(angle - nominal) <= tolerance:
                 return nominal
