@@ -349,6 +349,195 @@ def _process_one_edf(
 def compute_nematic_order_assembly_SWING(
     h5path,
     prefix='lacroix',
+    filelist =None,
+    reference_file=None,
+    k=1,
+    autosubstract=True,
+    mask=None,
+    qvalue=0.034,
+    threshold=0.05,
+    radius=78,
+    L=840,
+    radius_pd=0.3,
+    L_pd=0.75,
+    plot=False,
+    apply_mirror=None,
+    verbose=True, 
+    nb_ligne = 1,
+    nb_colonne= 1
+):
+    """
+    SAXS linescan processing with nematic order parameter computation
+    (PARALLELIZED VERSION)
+    """
+    
+
+    def log_step(step, total, message):
+        clear_output(wait=True)
+        display(Markdown(f"### Step {step}/{total}\n**{message}**"))
+
+    print("⚠️ WARNING: This function assumes the data correspond to a linescan.")
+    """
+    # === STEP 1: h5 files
+    log_step(1, 7, "Searching and sorting h5 files")
+    h5_filelist = sorted(
+        glob.glob(os.path.join(h5path, '*.h5')),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
+
+    # === STEP 2: h5 → EDF
+    log_step(2, 7, "Extracting frames and converting to EDF files")
+    edfpath = os.path.join(h5path, 'edf_files')
+    os.makedirs(edfpath, exist_ok=True)
+
+    for h5file in tqdm(h5_filelist, desc="Converting h5 → EDF"):
+        SWING_file = h5File_SWING(h5file, mean=False)
+        SWING_file.convert2edf(outputdir=edfpath)
+
+    === STEP 3: geometry
+    log_step(3, 7, "Determining scan geometry")
+    number_of_lines = len(h5_filelist)
+    number_of_columns = SWING_file.nb_frames
+
+    # === STEP 4: EDF list
+    log_step(4, 7, "Building EDF file list")
+    edf_filelist = sorted(
+        glob.glob(os.path.join(edfpath, '*Img*.edf')),
+        key=sort_edf
+    )
+    """
+
+
+
+    number_of_lines = nb_ligne
+    number_of_columns = nb_colonne
+
+    # === STEP 5: parallel nematic computation
+    log_step(5, 7, "Computing nematic order parameter (parallel)")
+
+    nfiles = len(filelist)
+
+    x_array = np.zeros(nfiles)
+    z_array = np.zeros(nfiles)
+    orientation_array = np.zeros(nfiles)
+    S_array = np.zeros(nfiles)
+    R2_array = np.zeros(nfiles)
+    data_list = []
+
+    n_jobs = max(1, multiprocessing.cpu_count() - 1)
+
+    results = Parallel(
+        n_jobs=n_jobs,
+        backend="loky",
+        verbose=10
+    )(
+        delayed(_process_one_edf)(
+            i,
+            file,
+            reference_file,
+            k,
+            autosubstract,
+            mask,
+            qvalue,
+            threshold,
+            radius,
+            L,
+            radius_pd,
+            L_pd,
+            apply_mirror,
+            verbose
+        )
+        for i, file in enumerate(filelist)
+    )
+
+    for i, x, z, orientation, S, R2, row_data in results:
+        x_array[i] = x
+        z_array[i] = z
+        orientation_array[i] = orientation
+        S_array[i] = S
+        R2_array[i] = R2
+        data_list.append(row_data)
+
+    # === STEP 6: CSV export
+    log_step(6, 7, "Exporting results to CSV")
+    df = pd.DataFrame(data_list)
+
+    outputpath = os.path.join(h5path, 'nematic_processing_results')
+    os.makedirs(outputpath, exist_ok=True)
+
+    csv_filename = os.path.join(outputpath, 'nematic_order_results.csv')
+    df.to_csv(csv_filename, index=False)
+
+    # === STEP 7: final map
+    log_step(7, 7, "Generating final nematic order map")
+
+    orientation_2d = orientation_array.reshape(number_of_lines, number_of_columns)
+    S_2d = S_array.reshape(number_of_lines, number_of_columns)
+    x_2d = x_array.reshape(number_of_lines, number_of_columns)
+    z_2d = z_array.reshape(number_of_lines, number_of_columns)
+    R2_2d = R2_array.reshape(number_of_lines, number_of_columns)
+
+    # Points originaux
+    x_orig = x_2d.flatten()
+    z_orig = z_2d.flatten()
+    
+    # Étendre légèrement les limites (5% de marge)
+    x_margin = (x_orig.max() - x_orig.min()) * 0.05
+    z_margin = (z_orig.max() - z_orig.min()) * 0.05
+    
+    x_min_ext = x_orig.min() - x_margin
+    x_max_ext = x_orig.max() + x_margin
+    z_min_ext = z_orig.min() - z_margin
+    z_max_ext = z_orig.max() + z_margin
+    
+    # Grille interpolée (2x plus fine)
+    x_interp = np.linspace(x_min_ext, x_max_ext, number_of_columns * 2)
+    z_interp = np.linspace(z_min_ext, z_max_ext, number_of_lines * 2)
+    x_grid, z_grid = np.meshgrid(x_interp, z_interp)
+    
+    # Interpoler S_2d (seulement les points valides)
+    points = np.column_stack((x_orig, z_orig))
+    values_S = S_2d.flatten()
+    
+    #print(f"Interpolation avec {len(values_S)} points")
+    
+    # Essayer d'abord avec 'linear', puis remplir les NaN avec 'nearest'
+    S_interp = griddata(points, values_S, (x_grid, z_grid), method='linear')
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    im = ax.imshow(
+        S_2d,
+        extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
+        origin='lower',
+        aspect='auto',
+        cmap='jet',
+        interpolation='bicubic'
+    )
+
+    u = np.cos(np.radians(orientation_2d))
+    v = np.sin(np.radians(orientation_2d))
+
+    ax.quiver(x_2d, z_2d, u, v, color='black', scale=15, width=0.005)
+
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('S', rotation=270, labelpad=20)
+
+    ax.set_xlabel('X position (mm)')
+    ax.set_ylabel('Z position (mm)')
+    ax.set_title('Nematic order parameter map')
+    ax.invert_yaxis()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(outputpath, 'nematic_orientation_map.png'))
+    plt.show()
+
+    return x_2d, z_2d, orientation_2d, S_2d, R2_2d
+
+'''
+def compute_nematic_order_assembly_SWING(
+    h5path,
+    prefix='lacroix',
     reference_file=None,
     k=1,
     autosubstract=True,
@@ -522,7 +711,7 @@ def compute_nematic_order_assembly_SWING(
     plt.savefig(os.path.join(outputpath, 'nematic_orientation_map.png'))
     plt.show()
 
-    return x_2d, z_2d, orientation_2d, S_2d, R2_2d
+    return x_2d, z_2d, orientation_2d, S_2d, R2_2d'''
 
 
 
@@ -644,24 +833,31 @@ def plot_from_csv(csvpath, R2_threshold=0.9):
     plot_nematic_order_map(x_2d, z_2d, orientation_2d, S_2d, R2_2d, R2_threshold=R2_threshold, outputpath=outputpath)
 
 
-def plot_transmission_map_from_singleh5(h5file):
+def plot_transmission_map_from_singleh5(h5file, proc):
     """Generate transmission map from a single SWING h5 file (map)"""
     SWING_file = h5File_SWING(h5file, mean=False)
     SWING_file._extract_from_h5()
     SWING_file._extract_scatteringdata()
-    nb_lines = SWING_file.raw_data.shape[0]
-    nb_columns = SWING_file.raw_data.shape[1]
+    nb_lines = SWING_file.raw_data.shape[1]
+    nb_columns = SWING_file.raw_data.shape[0]
 
     x_array = np.array([SWING_file.position_x_start + j * SWING_file.step_x for j in range(nb_columns)])
     z_array = np.array([SWING_file.position_z_start + i * SWING_file.step_z for i in range(nb_lines)])
-    transmission_array = np.array(SWING_file.transmission).reshape((nb_columns,nb_lines))
+    transmission_array = np.array(SWING_file.transmission).reshape((nb_lines, nb_columns))
+    print("matrice de trans")
+    print( transmission_array)
+    print("axes")
+    print(x_array)
+    print(SWING_file.step_z)
+
+    print(transmission_array.min(), transmission_array.max())
     
     fig, ax = plt.subplots(figsize=(10, 8))
     im = ax.imshow(
         transmission_array,
         extent=[x_array.min(), x_array.max(), z_array.min(), z_array.max()],
         origin='lower',
-        aspect='auto',
+        aspect=nb_columns / nb_lines,
         cmap='jet',
         interpolation='bicubic'
     )
@@ -672,7 +868,9 @@ def plot_transmission_map_from_singleh5(h5file):
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label('Transmission', rotation=270, labelpad=20, fontsize=14)
     plt.tight_layout()
-    figname = os.path.join(os.path.dirname(h5file), 'transmission_map_single.png')
+    output_dir = proc.path + '/saxs_trans/'
+    os.makedirs(output_dir, exist_ok=True)
+    figname = os.path.join(output_dir, f'{proc.samplename}_Img_{proc.file_number}')
     plt.savefig(figname, dpi=300, bbox_inches='tight')
     plt.show()
 
@@ -1196,6 +1394,8 @@ def detect_peaks_hybrid_interactive(proc,
     get_results.last_results = last_results
     
     return get_results
+
+
 
 
 def save_azimuthal_profiles_to_csv(

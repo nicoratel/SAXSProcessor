@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from scipy.signal import savgol_filter
+from adjustText import adjust_text
 import fabio
 import os
 import re
@@ -192,6 +193,7 @@ class SAXSProcessor:
             Maximum number of iterations
         """
         self.data = np.where(self.maskdata == 1.0, np.nan, self.data)
+        print(self.data.shape)
 
         for it in range(max_iter):
             modified = False
@@ -324,6 +326,7 @@ class SAXSProcessor:
             vmin=-4, vmax=0,
             normalize=True,
             q_circles=None,
+            peak_list=None,
             output_dir=None,
             rotate90=False):
         """
@@ -438,6 +441,60 @@ class SAXSProcessor:
                     bbox=dict(facecolor='white', alpha=1, edgecolor='none', pad=1),
                     clip_on=True)
                     
+        # --- Display peak points + automatically adjusted labels ---
+        if peak_list is not None:
+
+            texts = []  # store label objects for adjustText
+
+            for i, (q_val, chi_deg, d_val) in enumerate(peak_list):
+
+                # Convert polar → Cartesian (same convention as your plot)
+                chi_rad = np.radians(chi_deg)
+
+                x = q_val * np.cos(chi_rad)
+                y = -q_val * np.sin(chi_rad)
+
+                # --- Plot the peak point ---
+                ax.plot(
+                    x, y,
+                    marker="o",
+                    markersize=3,
+                    color="purple",
+                    zorder=10
+                )
+
+                label = ax.text(
+                    x, y,
+                    f"{d_val:.1f} nm ; {chi_deg:.0f}°",
+                    fontsize=8,
+                    color="white",
+                    ha="center",
+                    va="center",
+                    bbox=dict(
+                        facecolor="black",
+                        alpha=0.3,
+                        edgecolor="none",
+                        pad=1
+                    ),
+                    zorder=11
+                )
+
+                texts.append(label)
+
+            # --- Automatically adjust labels to avoid overlap ---
+            adjust_text(
+                texts,
+                ax=ax,
+                expand_text=(1.2, 1.4),
+                expand_points=(1.2, 1.4),
+                arrowprops=dict(
+                    arrowstyle="-",
+                    color="purple",
+                    alpha=0.5,
+                    lw=0.8
+                )
+            )
+        
         plt.tight_layout()
         
         
@@ -550,7 +607,7 @@ class SAXSProcessor:
             
         return chi, I
 
-    def extract_radial_profile(self, azimuth: float = 90, width: float = 10, save=True, output_dir=None):
+    def extract_radial_profile(self, azimuth: float = -90, width: float = 10, save=True, output_dir=None):
         """
         Extract radial profile in angular sector.
         

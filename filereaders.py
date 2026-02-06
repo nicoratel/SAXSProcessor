@@ -210,6 +210,8 @@ class h5File_SWING:
         with h5py.File(self.file, "r") as f:
             group = list(f.keys())[0]
             self.samplename = f[group + '/sample_info/ChemSAXS/sample_name'][()].decode('utf-8')
+            target = group + '/scan_data/eiger_image'
+            data_raw = np.array(f[target])
                        
             target = group + '/SWING/EIGER-4M'
             self.D = f[target + '/distance'][0] / 1000
@@ -234,16 +236,25 @@ class h5File_SWING:
             self.basler_image = f[group + '/SWING/i11-c-c08__dt__basler_analyzer/image'][()]
             # Retrieve positions (start and end) for X and Z (for possible mapping or alignment)
             self.position_x_start = f[group + '/SWING/i11-c-c08__ex__tab-mt_tx.4/position'][()]
+           
             self.position_x_end = f[group+'/SWING/i11-c-c08__ex__tab-mt_tx.4/position_post'][()]
             self.position_z_start = f[group + '/SWING/i11-c-c08__ex__tab-mt_tz.4/position'][()]
             self.position_z_end = f[group + '/SWING/i11-c-c08__ex__tab-mt_tz.4/position_post'][()]
             self.position = {'X_start': self.position_x_start, 'X_end': self.position_x_end,
                         'Z_start': self.position_z_start, 'Z_end': self.position_z_end}
+            print("position moteur :")
+            print(self.position)
             # Calculate step_x  and step_z
-            self.step_x=1000*(self.position_x_end-self.position_x_start)/self.nb_frames
-            self.step_z=1000*(self.position_z_end-self.position_z_start)/self.nb_frames
-            if self.step_z < 0.1:
-                self.step_z=0  
+            self.step_x=(self.position_x_end-self.position_x_start)/data_raw.shape[0]
+            print(self.position)
+            self.step_z=(self.position_z_end-self.position_z_start)/data_raw.shape[1]
+            print("step :")
+            print(self.step_x)
+            print(self.step_z)
+            print(self.nb_frames)
+
+            #if self.step_z < 0.1:
+            #    self.step_z=0  
 
             # Retrive sample transmission
             self.transmission = f[group + '/sample_info/sample_transmission'][()] # transmission array for line scans
@@ -273,14 +284,55 @@ class h5File_SWING:
         
         self.num_pixel_x = data.shape[-2]
         self.num_pixel_z = data.shape[-1]
+        self.Pts_x = data.shape[0]
+        self.Pts_z = data.shape[1]
+        print("info")
+        print(self.Pts_x)
+        print(self.Pts_z)
         return data
 
     def convert2edf(self, outputdir=None):
         filelist = []
+        for i in range(self.data.shape[0]):
+            for j in range(self.data.shape[1]):
+                print(j) 
+                print("convert")   
+                data2save = self.data[i][j]
+                print(data2save)
+                x = self.position_x_start + i * self.step_x
+                z = self.position_z_start + j * self.step_z
+                transmission_array = np.array(self.transmission).reshape((self.data.shape[1], self.data.shape[0]))
+                print("transmission", transmission_array)
+                header = {
+                    "WaveLength": str(self.wl),
+                    "Center_1": str(self.x_center),
+                    "Center_2": str(self.z_center),
+                    "PSize_1": str(self.pixel_size_x * self.bin_x),
+                    "PSize_2": str(self.pixel_size_z * self.bin_y),
+                    "SampleDistance": str(self.D),
+                    "Comment": str(self.samplename),
+                    "x":str(x[0]),
+                    "z":str(z[0]),
+                    "TransmittedFlux":str(transmission_array[j][i]) if not self.mean else str(self.transmission)
+                } 
+                img = fabio.edfimage.edfimage(data=data2save, header=header)
+                
+                if outputdir is None:
+                    outputdir = self.folder
+                else:
+                    os.makedirs(outputdir, exist_ok=True)
+                    
+                filename = os.path.join(outputdir, f'{self.samplename}_File_{self.file_number}_Img_{j}_{i}.edf')
+                img.write(filename)
+                filelist.append(filename)
+        return filelist
+    
+    '''def convert2edf(self, outputdir=None):
+        filelist = []
         for i in range(self.nb_frames):
             data2save = self.data[i]
             x = self.position_x_start + i * self.step_x
-            z = self.position_z_start + i * self.step_z
+            z = self.position_z_start + i * self.step_z # je comprends pas car on est sur une ligne
             header = {
                 "WaveLength": str(self.wl),
                 "Center_1": str(self.x_center),
@@ -303,7 +355,7 @@ class h5File_SWING:
             filename = os.path.join(outputdir, f'{self.samplename}_File_{self.file_number}_Img_{i}.edf')
             img.write(filename)
             filelist.append(filename)
-        return filelist
+        return filelist'''
     
     def convert_SWING_mask(self,maskfile):
         maskdata = np.loadtxt(maskfile, delimiter = ';')
