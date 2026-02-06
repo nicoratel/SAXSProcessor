@@ -278,8 +278,8 @@ class h5File_SWING:
         else:            
             data = data_raw
             
-        self.num_pixel_x = data.shape[1]
-        self.num_pixel_z = data.shape[2]
+        self.num_pixel_x = data.shape[-2]
+        self.num_pixel_z = data.shape[-1]
         return data
 
     def convert2edf(self, outputdir=None):
