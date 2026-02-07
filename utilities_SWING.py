@@ -1031,7 +1031,7 @@ def average_h5_processor(
 
        # 1. Create h5_file list
     h5_filelist = sorted(
-        glob.glob(os.path.join(h5path, '*.h5')),
+        glob.glob(os.path.join(h5path, '*.nxs', '*.h5')),
         key=lambda f: sort_h5(f, prefix=prefix)
     )
     nb_files = len(h5_filelist)
@@ -1925,8 +1925,9 @@ def global_analysis(
         csv_file,
         h5path,
         prefix='lacroix',
+		excel_file=None,
         #SAXSProcessor arguments
-        reference_file=None,
+		instrument=None,
         k=1,
         autosubstract=True,
         mask=None,
@@ -1959,9 +1960,10 @@ def global_analysis(
         verbose=False,
         plot=True):
     """
-    Perform global analysis on SWING h5 files including nematic order parameter determination 
+    OLD VERSION: Perform global analysis on SWING h5 files including nematic order parameter determination 
     and average correlation distance computation.
-
+	NEW VERSION: Same but for each h5 file separately, without averaging since each file is one experiment.
+	The final dictionnary should contain the results for each h5 files.
     Parameters:
     ----------
     csv_file : str
@@ -1971,9 +1973,11 @@ def global_analysis(
         Path to folder containing h5 files
     prefix : str
         h5 file prefix (default: 'lacroix')
+	excel file : str
+		Path of the excel file
     --------------- SAXSProcessor parameters --------------
-    reference_file : str, optional
-        Path to h5 file for reference measurement (default: None)
+    instrument : str
+		"SWING" for example
     k : float
         Coefficient for reference subtraction (default: 1)
     autosubstract : bool
@@ -2040,78 +2044,89 @@ def global_analysis(
     """
 
     # Create SAXSProcessor with average intensity
-    proc = average_h5_processor(
-        h5path=h5path,
-        prefix=prefix,
-        reference_file=reference_file,
-        k=k,
-        autosubstract=autosubstract,
-        mask=mask,
-        verbose=verbose
-    )
-    
-    # plot 2D intensity map
-    proc.plot2d_vsq()
-    
-    # Create CorrelationDistanceCalculator
-    corr = CorrelationDistanceCalculator(proc)
-    # Compute average correlation distance
-    distances, err, results_corr = corr.compute_correlation_distances(
-        nb_peaks=nb_peaks,
-        azimuth=azimuth,
-        width=width,
-        method=method,
-        qmin=qmin,
-        qmax=qmax,
-        # Peak detection parameters
-        window_length=window_length,
-        polyorder=polyorder,
-        prominence=prominence,
-        distance_pts=distance_pts,
-        # SPV refinement parameters
-        subtract_power_law=subtract_power_law,
-        power_law_method=power_law_method,
-        power_law_order=power_law_order,
-        power_law_range=power_law_range,
-        smooth=smooth,
-        smooth_sigma=smooth_sigma,
-        fit_window_width=fit_window_width,
-        verbose=verbose,
-        plot=plot
-    )
-    qvalues = results_corr['q_peaks']
-    
-    # Compute global nematic order parameter map
-    S_array = np.zeros(len(qvalues))
-    mean_orientation_array = np.zeros(len(qvalues))
-    
-    for i,qvalue in enumerate(qvalues):
-        S, mean_orientation, res = compute_nematic_parameter(
-            proc,
-            threshold=threshold,
-            radius=radius,
-            L=L,
-            radius_pd=radius_pd,
-            L_pd=L_pd,
-            plot=False,
-            apply_mirror=None,
-            verbose=True)
-        S_array[i]=S
-        mean_orientation_array[i]=mean_orientation
-    
-    # build results dictionary
-    results={
-    'samplename': proc.samplename,
-    'B (mT)': proc.B,
-    'q_peak (A⁻¹)': qvalues, # array of q values
-    'distance (A)': distances, # array of distances
-    'distance_error (A)': err, # array of errors
-    'mean_orientation (°)': mean_orientation_array, # array of mean orientations
-    'nematic_parameter': S_array # array of nematic order parameters
-    }       
+    # proc = average_h5_processor(
+    #     h5path=h5path,
+    #     prefix=prefix,
+    #     reference_file=reference_file,
+    #     k=k,
+    #     autosubstract=autosubstract,
+    #     mask=mask,
+    #     verbose=verbose
+    # )
 
-    # add dictionary to existing csv or create new one
+    from excel_parameters_extractor import get_all_params
+    for file in os.listdir(h5path): # only if nxs or h5 files
+        if file.endswith('.h5') or file.endswith('.nxs'):
+            print(f"\nProcessing file: {file}")
+            if L is None or radius is None:
+                diameter, radius_pd, length, L_pd, reference_file  = get_all_params(excel_file, h5path, file) # here specify the measurement name
+                if reference_file is not None : # dont compute the S for a reference file
+                   
+                    radius = diameter * 10/2
+                    L = length
+                    proc = SAXSProcessor(instrument= instrument,reference_file=reference_file ,autosubstract=True,file=os.path.join(h5path, file), mask=mask)
+                    # plot 2D intensity map
+                    proc.plot2d_vsq()
+                    
+                    # Create CorrelationDistanceCalculator
+                    corr = CorrelationDistanceCalculator(proc)
+                    # Compute average correlation distance
+                    distances, err, results_corr = corr.compute_correlation_distances(
+                        nb_peaks=nb_peaks,
+                        azimuth=azimuth,
+                        width=width,
+                        method=method,
+                        qmin=qmin,
+                        qmax=qmax,
+                        # Peak detection parameters
+                        window_length=window_length,
+                        polyorder=polyorder,
+                        prominence=prominence,
+                        distance_pts=distance_pts,
+                        # SPV refinement parameters
+                        subtract_power_law=subtract_power_law,
+                        power_law_method=power_law_method,
+                        power_law_order=power_law_order,
+                        power_law_range=power_law_range,
+                        smooth=smooth,
+                        smooth_sigma=smooth_sigma,
+                        fit_window_width=fit_window_width,
+                        verbose=verbose,
+                        plot=plot
+                    )
+                    qvalues = results_corr['q_peaks']
+                    
+                    # Compute global nematic order parameter map
+                    S_array = np.zeros(len(qvalues))
+                    mean_orientation_array = np.zeros(len(qvalues))
+                    
+                    for i,qvalue in enumerate(qvalues):
+                        S, mean_orientation, res = compute_nematic_parameter(
+                            proc,
+                            threshold=threshold,
+                            radius=radius,
+                            L=L,
+                            radius_pd=radius_pd,
+                            L_pd=L_pd,
+                            plot=False,
+                            apply_mirror=None,
+                            verbose=True)
+                        S_array[i]=S
+                        mean_orientation_array[i]=mean_orientation
+                    
+                    # build results dictionary taking in account each files in the folder and their corresponding qvalues, distances, errors, mean orientations and nematic parameters
+                    results={
+                    'samplename': proc.samplename,
+                    'B (mT)': proc.B,
+                    'q_peak (A⁻¹)': qvalues, # array of q values
+                    'distance (A)': distances, # array of distances
+                    'distance_error (A)': err, # array of errors
+                    'mean_orientation (°)': mean_orientation_array, # array of mean orientations
+                    'nematic_parameter': S_array # array of nematic order parameters
+                    }       
+
     
+    # add dictionary to existing csv or create new one
     if os.path.exists(csv_file):
         df_existing = pd.read_csv(csv_file)
         df_new = pd.DataFrame([results])
@@ -2122,8 +2137,10 @@ def global_analysis(
     else:
         df = pd.DataFrame([results])
         df.to_csv(csv_file, index=False)
-        print(f'The folloing line {df} has been added to new file {csv_file}')
+        print(f'The following line {df} has been added to new file {csv_file}')
     print(f"✓ Global analysis results saved to: {csv_file}")
+        
     return results
+
 
 
