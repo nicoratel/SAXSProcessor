@@ -2059,7 +2059,7 @@ def global_analysis(
         if file.endswith('.h5') or file.endswith('.nxs'):
             print(f"\nProcessing file: {file}")
             if L is None or radius is None:
-                diameter, radius_pd, length, L_pd, reference_file  = get_all_params(excel_file, h5path, file) # here specify the measurement name
+                diameter, radius_pd, length, L_pd, B, reference_file  = get_all_params(excel_file, h5path, file) # here specify the measurement name
                 if reference_file is not None : # dont compute the S for a reference file
                    
                     radius = diameter * 10/2
@@ -2117,7 +2117,7 @@ def global_analysis(
                     # build results dictionary taking in account each files in the folder and their corresponding qvalues, distances, errors, mean orientations and nematic parameters
                     results={
                     'samplename': proc.samplename,
-                    'B (mT)': proc.B,
+                    'B (mT)': B, # given by get_all_params()
                     'q_peak (A⁻¹)': qvalues, # array of q values
                     'distance (A)': distances, # array of distances
                     'distance_error (A)': err, # array of errors
