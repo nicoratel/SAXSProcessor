@@ -99,9 +99,9 @@ def excel_preprocess(excel_file, h5path):
     # Find the row in which that reference was measured 
     # = the row in which "SAMPLE" == "REFERENCE" and get the column "FILE" (which gives the ID of our background file)
 
-    diameter, polydispersity_d, length, polydispersity_L, reference_ID = process_measurement(excel_file, df_measurement, h5path)
+    diameter, polydispersity_d, length, polydispersity_L, B, reference_ID = process_measurement(excel_file, df_measurement, h5path)
 
-    return diameter, polydispersity_d, length, polydispersity_L, reference_ID
+    return diameter, polydispersity_d, length, polydispersity_L, B, reference_ID
 
 def process_measurement(excel_file, df_measurement, h5file):
 
@@ -125,7 +125,7 @@ def process_measurement(excel_file, df_measurement, h5file):
 
     except IndexError:
         print(f"Couldn't find the measurement name for the given ID {ID}.")
-        return None, None, None, None, None   
+        return None, None, None, None, None, None   
     
     # Search the corresponding measurement of the reference (where reference_name in column "SAMPLE")
     reference_name = df_measurement.loc[df_measurement['NAME'] == measurement_name, 'REFERENCE'].values[0] # find reference
@@ -138,7 +138,26 @@ def process_measurement(excel_file, df_measurement, h5file):
         # print("Couldn't find the reference measurement for", reference_name)
         reference_ID = None
 
-    ## Find diameter and polydispersity in df_sample 
+    # Find magnetic feild value for that measurement : first case: directly a number (great)
+    # second case (less great): it is written as "0 before" or "0 after", in this case retreive only the number and convert it to float !
+    if isinstance(df_measurement.loc[df_measurement['NAME'] == measurement_name, 'VALUE [mT]'].values[0], str):
+        try : 
+            B_str = df_measurement.loc[df_measurement['NAME'] == measurement_name, 'VALUE [mT]'].values[0]
+            B_str = B_str.split()[0] # take only the first part of the string, ex: "0 before" to "0"
+            B = float(B_str) # convert to float
+            # print("Magnetic field [mT]", B)
+        except Exception as e:
+            B = None
+            # print(f"Couldn't find the magnetic field for measurement {measurement_name} because of error: {e}")   
+    else :
+        try :
+            B = df_measurement.loc[df_measurement['NAME'] == measurement_name, 'VALUE [mT]'].values[0]
+            # print("Magnetic field [mT]", B)
+        except IndexError:
+            B = None
+            # print('Couldn\'t find the magnetic field for measurement  ', measurement_name)    
+
+    # Find diameter and polydispersity in df_sample 
     sample_name = df_measurement.loc[df_measurement['NAME'] == measurement_name, 'SAMPLE'].values[0] 
     # Preprocess of the second dataframe
     df_sample = pd.read_excel(excel_file, sheet_name= 'SAMPLES', header=3)
@@ -175,7 +194,7 @@ def process_measurement(excel_file, df_measurement, h5file):
         polydispersity_L = None
         # print('Couldn\'t find the polydispersity L [%] for sample  ', sample_name)
 
-    return diameter, polydispersity_d, length, polydispersity_L, reference_ID
+    return diameter, polydispersity_d, length, polydispersity_L, B, reference_ID
 
 
 def find_ref_file_from_ID(ID, bg_path):
@@ -227,13 +246,13 @@ def get_all_params(excel_file, bg_path, h5path):
         Name of the reference file.
     """
 
-    diameter, polydispersity_d, length, polydispersity_L, reference_ID = excel_preprocess(excel_file, h5path)
+    diameter, polydispersity_d, length, polydispersity_L, B, reference_ID = excel_preprocess(excel_file, h5path)
     if reference_ID is None:
         reference_file = None
     else:
         reference_file = find_ref_file_from_ID(reference_ID, bg_path)
 
-    return diameter, polydispersity_d, length, polydispersity_L, reference_file
+    return diameter, polydispersity_d, length, polydispersity_L, B, reference_file
 
 
 def final_dataframe(h5path, excel_file, csv_results_path):
@@ -383,4 +402,5 @@ def final_dataframe(h5path, excel_file, csv_results_path):
     
     except Exception as e:
         print(f"Error creating final dataframe: {e}")
+
         return None 
