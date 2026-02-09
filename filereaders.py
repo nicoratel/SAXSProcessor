@@ -34,7 +34,8 @@ class EdfFile:
               
         image = fabio.open(self.file)
         header = image.header
-        self.data = image.data
+        self.data =image.data.astype(float)
+        #trés important pour pouvoir soustraire la référence
         
         shape = self.data.shape
         self.num_pixel_x = shape[0]
@@ -290,6 +291,7 @@ class h5File_SWING:
         print(self.Pts_x)
         print(self.Pts_z)
         return data
+    
 
     def convert2edf(self, outputdir=None):
         filelist = []
