@@ -175,9 +175,28 @@ class NematicOrderCalculator:
         mask_nonzero = I_exp > 0
         theta_exp = theta_exp[mask_nonzero]
         I_fit_data = I_exp[mask_nonzero]
+
+        
+        #  pas de données -> fit impossible
+        if I_fit_data.size == 0:
+            if verbose:
+                print("⚠️ Aucun point non nul : fit annulé, S = 0")
+            return {
+                'I0': 0,
+                'm': 0,
+                'x0': target,
+                'a': 0,
+                'b': 0,
+                'S': 0.0,
+                'R2': 0.0,
+                'I_model': np.zeros_like(theta_exp),
+                'popt': None,
+                'pcov': None,}
         
         # Normalize
         I_fit_data = I_fit_data / np.max(I_fit_data)
+
+        
         
         if self.form_factor is not None:
             self.chi_ff, self.I_ff = self.form_factor.extract_azim_profile_formfactor(
