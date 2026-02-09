@@ -168,6 +168,21 @@ def compute_nematic_parameter(
         processor = processor,
         verbose=verbose
         )
+        
+    # --- gestion des résultats invalides ---
+    if results is None or results["S"] is None:
+        if verbose:
+            print("⚠️ Fit failed → returning S = NaN")
+        return np.nan, angle_folded, {
+            "S": np.nan,
+            "x0": np.nan,
+            "m": np.nan,
+            "R2": 0,
+            "I_model": None
+        }
+    
+
+    # --- sinon fit OK ---
     return results["S"], angle_folded, results
 
 
