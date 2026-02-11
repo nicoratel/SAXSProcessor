@@ -352,7 +352,7 @@ def compute_nematic_order_assembly_SWING(
     filelist =None,
     reference_file=None,
     k=1,
-    autosubstract=True,
+    autosubstract=False,
     mask=None,
     qvalue=0.034,
     threshold=0.05,
@@ -366,54 +366,11 @@ def compute_nematic_order_assembly_SWING(
     nb_ligne = 1,
     nb_colonne= 1
 ):
-    """
-    SAXS linescan processing with nematic order parameter computation
-    (PARALLELIZED VERSION)
-    """
     
-
-    def log_step(step, total, message):
-        clear_output(wait=True)
-        display(Markdown(f"### Step {step}/{total}\n**{message}**"))
-
     print("⚠️ WARNING: This function assumes the data correspond to a linescan.")
-    """
-    # === STEP 1: h5 files
-    log_step(1, 7, "Searching and sorting h5 files")
-    h5_filelist = sorted(
-        glob.glob(os.path.join(h5path, '*.h5')),
-        key=lambda f: sort_h5(f, prefix=prefix)
-    )
-
-    # === STEP 2: h5 → EDF
-    log_step(2, 7, "Extracting frames and converting to EDF files")
-    edfpath = os.path.join(h5path, 'edf_files')
-    os.makedirs(edfpath, exist_ok=True)
-
-    for h5file in tqdm(h5_filelist, desc="Converting h5 → EDF"):
-        SWING_file = h5File_SWING(h5file, mean=False)
-        SWING_file.convert2edf(outputdir=edfpath)
-
-    === STEP 3: geometry
-    log_step(3, 7, "Determining scan geometry")
-    number_of_lines = len(h5_filelist)
-    number_of_columns = SWING_file.nb_frames
-
-    # === STEP 4: EDF list
-    log_step(4, 7, "Building EDF file list")
-    edf_filelist = sorted(
-        glob.glob(os.path.join(edfpath, '*Img*.edf')),
-        key=sort_edf
-    )
-    """
-
-
-
+    
     number_of_lines = nb_ligne
     number_of_columns = nb_colonne
-
-    # === STEP 5: parallel nematic computation
-    log_step(5, 7, "Computing nematic order parameter (parallel)")
 
     nfiles = len(filelist)
 
@@ -451,25 +408,38 @@ def compute_nematic_order_assembly_SWING(
     )
 
     for i, x, z, orientation, S, R2, row_data in results:
+        print(i, x, z)
         x_array[i] = x
         z_array[i] = z
         orientation_array[i] = orientation
-        S_array[i] = S
-        R2_array[i] = R2
         data_list.append(row_data)
+        R2_array[i] = R2
+        S_array[i] = S
+        #print("Avant R",R2)
+        if R2 < 0.8:
+            S_array[i] = 0
+            orientation_array[i] = np.nan 
 
-    # === STEP 6: CSV export
-    log_step(6, 7, "Exporting results to CSV")
+    #print(S_array)
+    #print(orientation_array)
+    
+        
+
     df = pd.DataFrame(data_list)
+
+    # Récupérer samplename du premier élément
+    first_samplename = df["samplename"].iloc[0]
+
+    # Nettoyer pour éviter les caractères interdits dans les noms de fichiers
+    safe_samplename = "".join(c for c in first_samplename if c.isalnum() or c in ("_", "-", "."))
 
     outputpath = os.path.join(h5path, 'nematic_processing_results')
     os.makedirs(outputpath, exist_ok=True)
 
-    csv_filename = os.path.join(outputpath, 'nematic_order_results.csv')
-    df.to_csv(csv_filename, index=False)
+    # Construire le nom du CSV
+    csv_filename = os.path.join(outputpath, f'nematic_order_results_{safe_samplename}.csv')
 
-    # === STEP 7: final map
-    log_step(7, 7, "Generating final nematic order map")
+    df.to_csv(csv_filename, index=False)
 
     orientation_2d = orientation_array.reshape(number_of_lines, number_of_columns)
     S_2d = S_array.reshape(number_of_lines, number_of_columns)
@@ -477,6 +447,10 @@ def compute_nematic_order_assembly_SWING(
     z_2d = z_array.reshape(number_of_lines, number_of_columns)
     R2_2d = R2_array.reshape(number_of_lines, number_of_columns)
 
+    #print("angle", orientation_2d)
+    #print("S", S_2d)
+
+    
     # Points originaux
     x_orig = x_2d.flatten()
     z_orig = z_2d.flatten()
@@ -498,42 +472,193 @@ def compute_nematic_order_assembly_SWING(
     # Interpoler S_2d (seulement les points valides)
     points = np.column_stack((x_orig, z_orig))
     values_S = S_2d.flatten()
-    
-    #print(f"Interpolation avec {len(values_S)} points")
-    
-    # Essayer d'abord avec 'linear', puis remplir les NaN avec 'nearest'
-    S_interp = griddata(points, values_S, (x_grid, z_grid), method='linear')
-    
-    fig, ax = plt.subplots(figsize=(10, 8))
 
-    im = ax.imshow(
+    #print("interpo", points, values_S)
+
+    import matplotlib.colors as mcolors
+
+    def cmap_red_yellow_blue():
+        return mcolors.LinearSegmentedColormap.from_list(
+            "ryc",
+            [
+                (0.0, "cyan"),   # valeur 0
+                (0.90, "yellow"),
+                (0.95, "red"),
+                (1.0, "darkred"),
+            ]
+        )
+
+    cmap2 = cmap_red_yellow_blue()
+	
+
+	# Differents types de cartographie
+	'''
+    # --- FIGURE 1 : SANS INTERPOLATION ---
+    fig1, ax1 = plt.subplots(figsize=(10, 8))
+
+    print("Carte 1 S", S_2d)
+
+    im1 = ax1.imshow(
         S_2d,
         extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
         origin='lower',
-        aspect='auto',
-        cmap='jet',
-        interpolation='bicubic'
+        aspect="auto",
+        cmap=cmap2,
+        interpolation='nearest'      # ← aucun lissage
+    )
+
+    # tracer les orientations (mais pas sur NaN)
+    valid = ~np.isnan(orientation_2d)
+    u = np.cos(np.radians(orientation_2d[valid]))
+    v = np.sin(np.radians(orientation_2d[valid]))
+
+    print(x_2d[valid], z_2d[valid], u, v)
+
+    ax1.quiver(x_2d[valid], z_2d[valid], u, v, color='black', scale=15, width=0.005 )
+
+    cbar = plt.colorbar(im1, ax=ax1)
+    cbar.set_label('S', rotation=270, labelpad=20)
+    ax1.set_title("Carte brute (pas d'interpolation)")
+    ax1.set_xlabel('X position (mm)')
+    ax1.set_ylabel('Z position (mm)')
+    ax1.invert_yaxis()
+    plt.tight_layout()
+    plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_no_interp.png'))
+    plt.show()'''
+
+    # ----------------------------------------------------------------------
+    # --- FIGURE 2 : INTERPOLATION UNIQUEMENT ENTRE POINTS VALIDES ---
+    points_valid = np.column_stack((x_orig[~np.isnan(values_S)], 
+                                    z_orig[~np.isnan(values_S)]))
+    values_valid = values_S[~np.isnan(values_S)]
+    
+   
+    
+
+    S_interp_valid_only = griddata(
+        points_valid,
+        values_valid,
+        (x_grid, z_grid),
+        method='nearest'
+    )
+
+    print("Carte 2 S", S_interp_valid_only)
+
+    fig2, ax2 = plt.subplots(figsize=(10, 8))
+
+    im2 = ax2.imshow(
+        S_interp_valid_only,
+        extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
+        origin='lower',
+        aspect="auto",
+        cmap=cmap2,
+        interpolation='bicubic'      # ← interpolation lissée mais seulement sur zones valides
+    )
+    #print(x_2d[valid], z_2d[valid], u, v)
+
+    # flèches : uniquement sur points valides
+    ax2.quiver(x_2d[valid], z_2d[valid], u, v, color='black', scale=15)
+
+    plt.colorbar(im2, ax=ax2)
+    ax2.set_title("Carte interpolée uniquement dans zones valides")
+    ax2.invert_yaxis()
+    plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_interp_valid.png'))
+    plt.show()
+
+	'''
+
+    #linéar 
+
+    points = np.column_stack((x_2d.flatten(), z_2d.flatten()))
+    values = S_2d.flatten()
+
+    xi = np.linspace(x_2d.min(), x_2d.max(), 400)
+    zi = np.linspace(z_2d.min(), z_2d.max(), 400)
+    X, Z = np.meshgrid(xi, zi)
+
+    S_interp = griddata(points, values, (X, Z), method="linear")
+
+    print("Carte 3 S", S_interp)
+    
+
+    fig, ax3 = plt.subplots(figsize=(10,8))
+
+    im3 = ax3.imshow(
+        S_interp,
+        extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
+        origin="lower",
+        aspect="auto",
+        cmap=cmap2,
+        interpolation="bicubic"
     )
 
     u = np.cos(np.radians(orientation_2d))
     v = np.sin(np.radians(orientation_2d))
+    print(x_2d, z_2d, u, v)
+    ax3.quiver(x_2d, z_2d, u, v, color='black', scale=15, width=0.005)
 
-    ax.quiver(x_2d, z_2d, u, v, color='black', scale=15, width=0.005)
-
-    cbar = plt.colorbar(im, ax=ax)
+    cbar = plt.colorbar(im3, ax=ax3)
     cbar.set_label('S', rotation=270, labelpad=20)
-
-    ax.set_xlabel('X position (mm)')
-    ax.set_ylabel('Z position (mm)')
-    ax.set_title('Nematic order parameter map')
-    ax.invert_yaxis()
-
+    ax3.set_title("Carte brute (pas d'interpolation)")
+    ax3.set_xlabel('X position (mm)')
+    ax3.set_ylabel('Z position (mm)')
+    ax3.invert_yaxis()
+    plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_3.png'))
     plt.tight_layout()
-    plt.savefig(os.path.join(outputpath, 'nematic_orientation_map.png'))
-    plt.show()
+
+    # 4 
+
+    points = np.column_stack((x_2d.flatten(), z_2d.flatten()))
+    values = S_2d.flatten()
+
+    valid = values > 0     # on exclut les 0
+
+
+    xi = np.linspace(x_2d.min(), x_2d.max(), 400)
+    zi = np.linspace(z_2d.min(), z_2d.max(), 400)
+    X, Z = np.meshgrid(xi, zi)
+
+       
+
+    S_interp = griddata(
+        points[valid],
+        values[valid],
+        (X, Z),
+        method="linear"
+    )
+
+    print("Carte 4 S", S_interp)
+ 
+
+
+    fig, ax4 = plt.subplots(figsize=(10,8))
+    im4 = ax4.imshow(
+        S_interp,
+        extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
+        origin="lower",
+        aspect="auto",
+        cmap=cmap2,
+        interpolation="bicubic"
+    )
+        
+    u = np.cos(np.radians(orientation_2d))
+    v = np.sin(np.radians(orientation_2d))
+
+    print(x_2d, z_2d, u, v)
+    ax4.quiver(x_2d, z_2d, u, v, color='black', scale=15, width=0.005)
+
+    cbar = plt.colorbar(im4, ax=ax4)
+    cbar.set_label('S', rotation=270, labelpad=20)
+    ax4.set_title("Carte brute (pas d'interpolation)")
+    ax4.set_xlabel('X position (mm)')
+    ax4.set_ylabel('Z position (mm)')
+    ax4.invert_yaxis()
+    plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_4.png'))
+    plt.tight_layout()'''
 
     return x_2d, z_2d, orientation_2d, S_2d, R2_2d
 
+# Ancienne version de compute_nematic_ordre_assembly_swing
 '''
 def compute_nematic_order_assembly_SWING(
     h5path,
@@ -844,13 +969,13 @@ def plot_transmission_map_from_singleh5(h5file, proc):
     x_array = np.array([SWING_file.position_x_start + j * SWING_file.step_x for j in range(nb_columns)])
     z_array = np.array([SWING_file.position_z_start + i * SWING_file.step_z for i in range(nb_lines)])
     transmission_array = np.array(SWING_file.transmission).reshape((nb_lines, nb_columns))
-    print("matrice de trans")
-    print( transmission_array)
-    print("axes")
-    print(x_array)
-    print(SWING_file.step_z)
+    #print("matrice de trans")
+    #print( transmission_array)
+    #print("axes")
+    #print(x_array)
+    #print(SWING_file.step_z)
 
-    print(transmission_array.min(), transmission_array.max())
+    #print(transmission_array.min(), transmission_array.max())
     
     fig, ax = plt.subplots(figsize=(10, 8))
     im = ax.imshow(
@@ -1031,7 +1156,7 @@ def average_h5_processor(
 
        # 1. Create h5_file list
     h5_filelist = sorted(
-        glob.glob(os.path.join(h5path, '*.nxs', '*.h5')),
+        glob.glob(os.path.join(h5path, '*.h5')),
         key=lambda f: sort_h5(f, prefix=prefix)
     )
     nb_files = len(h5_filelist)
