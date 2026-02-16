@@ -492,39 +492,38 @@ def compute_nematic_order_assembly_SWING(
 	
 
 	# Differents types de cartographie
-	'''
-    # --- FIGURE 1 : SANS INTERPOLATION ---
-    fig1, ax1 = plt.subplots(figsize=(10, 8))
+    """ # --- FIGURE 1 : SANS INTERPOLATION ---
+        fig1, ax1 = plt.subplots(figsize=(10, 8))
 
-    print("Carte 1 S", S_2d)
+        print("Carte 1 S", S_2d)
 
-    im1 = ax1.imshow(
-        S_2d,
-        extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
-        origin='lower',
-        aspect="auto",
-        cmap=cmap2,
-        interpolation='nearest'      # ← aucun lissage
-    )
+        im1 = ax1.imshow(
+            S_2d,
+            extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
+            origin='lower',
+            aspect="auto",
+            cmap=cmap2,
+            interpolation='nearest'      # ← aucun lissage
+        )
 
-    # tracer les orientations (mais pas sur NaN)
-    valid = ~np.isnan(orientation_2d)
-    u = np.cos(np.radians(orientation_2d[valid]))
-    v = np.sin(np.radians(orientation_2d[valid]))
+        # tracer les orientations (mais pas sur NaN)
+        valid = ~np.isnan(orientation_2d)
+        u = np.cos(np.radians(orientation_2d[valid]))
+        v = np.sin(np.radians(orientation_2d[valid]))
 
-    print(x_2d[valid], z_2d[valid], u, v)
+        print(x_2d[valid], z_2d[valid], u, v)
 
-    ax1.quiver(x_2d[valid], z_2d[valid], u, v, color='black', scale=15, width=0.005 )
+        ax1.quiver(x_2d[valid], z_2d[valid], u, v, color='black', scale=15, width=0.005 )
 
-    cbar = plt.colorbar(im1, ax=ax1)
-    cbar.set_label('S', rotation=270, labelpad=20)
-    ax1.set_title("Carte brute (pas d'interpolation)")
-    ax1.set_xlabel('X position (mm)')
-    ax1.set_ylabel('Z position (mm)')
-    ax1.invert_yaxis()
-    plt.tight_layout()
-    plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_no_interp.png'))
-    plt.show()'''
+        cbar = plt.colorbar(im1, ax=ax1)
+        cbar.set_label('S', rotation=270, labelpad=20)
+        ax1.set_title("Carte brute (pas d'interpolation)")
+        ax1.set_xlabel('X position (mm)')
+        ax1.set_ylabel('Z position (mm)')
+        ax1.invert_yaxis()
+        plt.tight_layout()
+        plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_no_interp.png'))
+        plt.show()"""
 
     # ----------------------------------------------------------------------
     # --- FIGURE 2 : INTERPOLATION UNIQUEMENT ENTRE POINTS VALIDES ---
@@ -554,6 +553,9 @@ def compute_nematic_order_assembly_SWING(
         cmap=cmap2,
         interpolation='bicubic'      # ← interpolation lissée mais seulement sur zones valides
     )
+    valid = ~np.isnan(orientation_2d)
+    u = np.cos(np.radians(orientation_2d[valid]))
+    v = np.sin(np.radians(orientation_2d[valid]))
     #print(x_2d[valid], z_2d[valid], u, v)
 
     # flèches : uniquement sur points valides
@@ -565,7 +567,8 @@ def compute_nematic_order_assembly_SWING(
     plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_interp_valid.png'))
     plt.show()
 
-	'''
+
+    '''
 
     #linéar 
 
