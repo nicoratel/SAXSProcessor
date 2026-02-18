@@ -87,7 +87,7 @@ class NematicOrderCalculator:
         den = quad(lambda x: np.exp(m * x**2), -1, 1, epsabs=1e-10, epsrel=1e-10)[0]
         return num / den
     
-    
+
     def convolve_with_form_factor(self, chi_array, m, x0, n_phi=360):
         """
         Compute azimuthal profile by convolving form factor with Maier-Saupe distribution.
@@ -736,7 +736,7 @@ if SASMODELS_AVAILABLE:
             return -chi, I
             #return chi, I  # Invert chi to match experimental convention
 
-class BatchNematic:
+class BatchNematic_old:
     """
     Process multiple SAXS files and extract nematic order parameters.
     Simplified: uses a single NematicOrderCalculator with CylinderFormFactor.
@@ -837,6 +837,9 @@ class BatchNematic:
             number = '0'
             
         return int(number)
+    
+    
+    
     
     def process_all(self, save_profiles=True, plot=False, apply_mirror=False):
         """
@@ -1004,6 +1007,300 @@ class BatchNematic:
 
             
             output_csv = os.path.join(self.output_dir, 'nematic_order_results.csv')
+            df.to_csv(output_csv, index=False)
+            print(f"✓ Results CSV saved: {output_csv}")
+            
+                      
+            return df
+        else:
+            print("⚠ No successful fits to save")
+            return pd.DataFrame()
+        
+class BatchNematic:
+    """
+    Process multiple SAXS files and extract nematic order parameters.
+    Simplified: uses a single NematicOrderCalculator with CylinderFormFactor.
+    """
+    
+    def __init__(self, 
+                 path, 
+                 instrument='ID02',
+                 qvalues=None,
+                 file_filter='*_eiger2*_raw.h5',
+                 threshold=0.0001,
+                 binning=1,
+                 mask=None,
+                 reference_file: str = None,
+                 k=1,
+                 autosubstract: bool = True,
+                 form_factor=None,
+                 output_dir=None,
+                 structure = None,
+                 case='SAXS',
+                 target = 90,
+                 apply_fitmask=False
+                 ):
+        """
+        Initialize batch processor.
+        
+        Parameters:
+        -----------
+        path : str
+            Directory containing data files
+        instrument : str
+            Beamline name
+        qvalues : list
+            Q values for azimuthal profiles (Å⁻¹)
+        file_filter : str
+            Wildcard pattern for files
+        threshold : float
+            Q tolerance for azimuthal profile extraction
+        binning : int
+            Binning factor
+        mask : str
+            Path to mask file
+        reference_file : str
+            Path to reference file for background subtraction
+        k : float
+            Scaling factor for background subtraction
+        autosubstract : bool
+            Enable automatic background subtraction
+        form_factor : CylinderFormFactor or None
+            Form factor object (profiles extracted on-the-fly for each q)
+        output_dir : str
+            Directory to save output files
+        structure:
+            CrystalStructure instance for WAXS data analysis
+        case:
+            Indicates whether treating SAXS/WAXS
+        target: int
+            Target value for azimuthal peak (90 or 0°)
+        apply_fitmask:
+            Indicates whether apply mask on fit data. Mask is centered around target.
+          
+        """
+        self.target = target
+        self.apply_fitmask=apply_fitmask
+        self.case = case
+        if structure is not None:
+            self.structure = structure
+        self.path = path
+        self.instrument = instrument
+        self.qvalues = qvalues if qvalues is not None else None
+        self.reflections = structure.reflections if structure is not None else None
+        self.threshold = threshold
+        self.binning = binning
+        self.mask = mask
+        self.reference_file = reference_file
+        self.k = k
+        self.autosubstract = autosubstract
+        self.h5_filelist = sorted(glob.glob(os.path.join(path, file_filter)), 
+                                 key=self._extract_number)
+        self.output_dir = output_dir if output_dir is not None else self.path
+        
+        # Create a single NematicOrderCalculator with the form factor
+        self.nematic_calc = NematicOrderCalculator(form_factor=form_factor)
+        
+        print(f"\n{'=' * 60}")
+        print(f"BatchNematic initialized")
+        print(f"{'=' * 60}")
+        print(f"Path: {self.path}")
+        if self.case =='SAXS':
+            print(f"Q values: {self.qvalues}")
+        if self.case =='WAXS':
+            print(f'Reflections: {self.structure.reflections}')
+        print(f"Found {len(self.h5_filelist)} files to process")
+        print(f"Output directory: {self.output_dir}")
+        print(f"{'=' * 60}\n")
+
+    def _extract_number(self, file_path):
+        """Extract file number for sorting."""
+        filename = os.path.basename(file_path)
+        extension = filename.split('.')[-1]
+        
+        if self.instrument == 'ID02':
+            number = filename.split('_')[2]
+        elif self.instrument == 'SWING':
+            number = filename.split('_')[1]
+        elif extension == 'edf':
+            basename = filename.split('.')[0]
+            number = basename.split('_')[-1].split('-')[0]
+        else:
+            number = '0'
+            
+        return int(number)
+    
+    def process_all(self, save_profiles=True, plot=False, apply_mirror=False):
+        """
+        Process all files and compute nematic order parameters.
+        
+        Parameters:
+        -----------
+        save_profiles : bool
+            Save azimuthal profiles
+        plot : bool
+            Display fitting results
+        apply_mirror : bool
+            Apply mirror symmetry to experimental profiles
+            
+        Returns:
+        --------
+        df : DataFrame
+            Results table
+        """
+        results = []
+        logfile = os.path.join(self.output_dir, f'batch_processing_target={self.target}.log')
+        log_lines = []
+        
+        for file in self.h5_filelist:
+            try:
+                print(f"\n{'=' * 60}")
+                print(f"Processing: {os.path.basename(file)}")
+                print(f"{'=' * 60}")
+                if self.case =='SAXS':
+                    processor = SAXSProcessor(
+                        file,
+                        instrument=self.instrument,
+                        binning=self.binning,
+                        mask=self.mask,
+                        reference_file=self.reference_file,
+                        k=self.k,
+                        autosubstract=self.autosubstract
+                    )
+                elif self.case =='WAXS':
+                    processor = WAXSProcessor(
+                        file,
+                        structure=self.structure,
+                        mask=self.mask,
+                        mapping = True,
+                        instrument = self.instrument,
+                        output_dir=self.output_dir
+                    )
+                if self.case == 'SAXS':
+                    for qvalue in self.qvalues:
+                        print(f"\nProcessing q = {qvalue:.4f} Å⁻¹...")
+                        
+                        # Extract experimental azimuthal profile
+                        chi_exp, I_exp = processor.extract_azimuthal_profile(
+                            qvalue, 
+                            threshold=self.threshold,
+                            save=save_profiles,
+                            output_dir=self.output_dir
+                        )
+                        
+                        # Fit with NematicOrderCalculator (form factor extracted on-the-fly)
+                        fit_results = self.nematic_calc.fit_azimuthal_profile(
+                            chi_exp, I_exp,
+                            qvalue_ff=qvalue,  # ← Extract FF profile at this q
+                            threshold_ff=self.threshold,
+                            target=self.target,
+                            smooth=False,
+                            plot=plot,
+                            apply_mirror=apply_mirror, 
+                            apply_fitmask=self.apply_fitmask,
+                            processor = processor
+                        )
+                        
+                        if fit_results is not None:
+                            results.append({
+                                'File': os.path.basename(file),
+                                'Sample': processor.samplename,
+                                'B (mT)': processor.B,
+                                'File_Number': processor.file_number,
+                                'q (Å⁻¹)': qvalue,
+                                'S': fit_results['S'],
+                                'wparr':fit_results['wparr'],
+                                'wiso':fit_results['wiso'],
+                                'm': fit_results['m'],
+                                'x0 (°)': fit_results['x0'],
+                                'I0': fit_results['I0'],
+                                'b (offset)': fit_results['b'],
+                                'R²': fit_results['R2']                           
+                            })
+                            
+                            success_msg = (f"  ✓ Success | q={qvalue:.4f} | S={fit_results['S']:.4f} | "
+                                        f"m={fit_results['m']:.2f} | R²={fit_results['R2']:.4f}")
+                            print(success_msg)
+                            log_lines.append(success_msg)
+                        else:
+                            fail_msg = f"  ✗ Fit failed for q = {qvalue:.4f} Å⁻¹"
+                            print(fail_msg)
+                            log_lines.append(fail_msg)
+                if self.case == 'WAXS':
+                    for reflection in self.reflections:
+                        ref_str = "".join(str(a) for a in reflection)
+                        print(f"\nProcessing reflection = {ref_str}...")
+                        
+                        # Extract experimental azimuthal profile
+                        chi_exp, I_exp = processor.extract_azimuthal_profile(
+                            reflection, 
+                            save=save_profiles)
+                        
+                        # Fit with NematicOrderCalculator (form factor extracted on-the-fly)
+                        fit_results = self.nematic_calc.fit_azimuthal_profile(
+                            chi_exp, I_exp,
+                            smooth=False,
+                            plot=plot,
+                            apply_mirror=apply_mirror,
+                            target = self.target,
+                            apply_fitmask=self.apply_fitmask
+                        )
+                        
+                        if fit_results is not None:
+                            results.append({
+                                'File': os.path.basename(file),
+                                'Sample': processor.samplename,
+                                'B (mT)': processor.B,
+                                'File_Number': processor.file_number,
+                                'reflection': ref_str,
+                                'S': fit_results['S'],
+                                'wparr':fit_results['wparr'],
+                                'wiso':fit_results['wiso'],
+                                'm': fit_results['m'],
+                                'x0 (°)': fit_results['x0'],
+                                'I0': fit_results['I0'],
+                                'b (offset)': fit_results['b'],
+                                'R²': fit_results['R2']                           
+                            })
+                            
+                            success_msg = (f"  ✓ Success | reflection={ref_str} | S={fit_results['S']:.4f} | "
+                                        f"m={fit_results['m']:.2f} | R²={fit_results['R2']:.4f}")
+                            print(success_msg)
+                            log_lines.append(success_msg)
+                        else:
+                            fail_msg = f"  ✗ Fit failed for reflection = {ref_str}"
+                            print(fail_msg)
+                            log_lines.append(fail_msg)
+                
+                        
+            except Exception as e:
+                error_msg = f"ERROR processing {os.path.basename(file)}: {str(e)}"
+                print(f"\n{error_msg}")
+                log_lines.append(error_msg)
+                import traceback
+                traceback.print_exc()
+        
+        # Save log
+        print(f"\n{'=' * 60}")
+        print("Saving results...")
+        print(f"{'=' * 60}")
+        
+        with open(logfile, 'w') as f:
+            f.write('\n'.join(log_lines))
+        print(f"✓ Log file saved: {logfile}")
+        
+        # Create DataFrame
+        if len(results) > 0:
+            df = pd.DataFrame(results)
+            
+            # Sort by file number and q value
+            if self.case =='SAXS':
+                df = df.sort_values(['File_Number', 'q (Å⁻¹)'])
+            if self.case =='WAXS':
+                df = df.sort_values(['File_Number', 'reflection'])
+
+            
+            output_csv = os.path.join(self.output_dir, f'nematic_order_results_target={self.target}.csv')
             df.to_csv(output_csv, index=False)
             print(f"✓ Results CSV saved: {output_csv}")
             
