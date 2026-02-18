@@ -144,6 +144,7 @@ class NematicOrderCalculator:
                         plot=False,
                         apply_mirror=False,
                         apply_fitmask=False,
+                        verbose=True,
                         processor = None):  # <- nouveau paramètre
         """
         Fit experimental azimuthal profile with Maier-Saupe model.
@@ -309,10 +310,12 @@ class NematicOrderCalculator:
             'popt': popt,
             'pcov': pcov 
         }
-        relevant_items = ['S','R2','wparr','wiso']
-        for key, value in results.items():
-            if key in relevant_items:
-                print(f"{key}: {value}")
+        if verbose:
+            print("\nFitting results:")
+            relevant_items = ['S','R2','wparr','wiso']
+            for key, value in results.items():
+                if key in relevant_items:
+                    print(f"{key}: {value}")
         return results
     
     
