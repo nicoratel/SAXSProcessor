@@ -69,7 +69,7 @@ class NematicOrderCalculator:
         return D / NematicOrderCalculator.Z_MS(m, x0)
     
     @staticmethod
-    def compute_S(m, x0):
+    def compute_S_old(m, x0):
         """Compute nematic order parameter S from Maier-Saupe parameters."""
         num_integrand = lambda theta: (0.5 * (3*np.cos(theta - np.radians(x0))**2 - 1)) \
                                     * np.exp(m*np.cos(theta - np.radians(x0))**2) * np.sin(theta)
@@ -79,6 +79,14 @@ class NematicOrderCalculator:
         den, _ = quad(den_integrand, 0, np.pi, epsabs=1e-10, epsrel=1e-10)
 
         return num / den
+    
+    @staticmethod
+    def compute_S(m):
+        P2 = lambda x: 0.5*(3*x**2 - 1)
+        num = quad(lambda x: P2(x) * np.exp(m * x**2), -1, 1, epsabs=1e-10, epsrel=1e-10)[0]
+        den = quad(lambda x: np.exp(m * x**2), -1, 1, epsabs=1e-10, epsrel=1e-10)[0]
+        return num / den
+    
     
     def convolve_with_form_factor(self, chi_array, m, x0, n_phi=360):
         """
@@ -127,6 +135,189 @@ class NematicOrderCalculator:
         return np.array(intensities)
     
     def fit_azimuthal_profile(self, theta_exp, I_exp, 
+                        qvalue_ff=0.034, 
+                        threshold_ff=0.001,
+                        target=90.0, 
+                        smooth=False, 
+                        window_length=11, 
+                        polyorder=2, 
+                        plot=False,
+                        apply_mirror=False,
+                        apply_fitmask=False,
+                        processor = None):  # <- nouveau paramètre
+        """
+        Fit experimental azimuthal profile with Maier-Saupe model.
+        
+        Parameters:
+        -----------
+        theta_exp, I_exp : arrays
+            Experimental data
+        qvalue_ff : float
+            Q value for form factor extraction (if applicable)
+        threshold_ff : float
+            Threshold for form factor extraction
+        target : float
+            Center of mask (°)
+        smooth : bool
+            Apply Savitzky-Golay smoothing
+        window_length, polyorder : int
+            Smoothing parameters
+        plot : bool
+            Display result
+        apply_mirror : bool
+            Apply mirror symmetry to the data
+        apply_mask : bool
+            Apply mask centered on target with ±45° range
+                    
+        Returns:
+        --------
+        results : dict
+            Dictionary with fit results including S parameter
+        """
+        if apply_mirror:
+            theta_exp, I_exp = self.mirror_profile(theta_exp, I_exp)
+        if smooth:
+            I_fit_data = savgol_filter(I_exp, window_length, polyorder)
+        else:
+            I_fit_data = I_exp.copy()
+
+        
+
+        if self.form_factor is not None:
+            self.chi_ff, self.I_ff = self.form_factor.extract_azim_profile_formfactor(
+                self.form_factor.I_ff2D, q0=qvalue_ff, threshold=threshold_ff, plot=False)
+        else:
+            self.chi_ff, self.I_ff = None, None
+
+        if self.chi_ff is not None and self.I_ff is not None:
+            def model_func(theta, I0, m, x0, b):
+                I_ms = self.convolve_with_form_factor(theta, m, x0)
+                return I0 * I_ms +  b
+        else:
+            def model_func(theta, I0, m, x0, b):
+                theta_rad = np.radians(theta)
+                I_ms = self.ms_distribution(theta_rad, m, x0)
+                return I0 * I_ms + b
+
+        # Appliquer le mask si demandé
+        if apply_fitmask:
+            mask_width = 70.0  # largeur totale
+            half_width = mask_width / 2
+            lower = target - half_width
+            upper = target + half_width
+            
+            # gérer le wrap-around à ±180°
+            if lower < -180:
+                mask = (theta_exp >= (lower + 360)) | (theta_exp <= upper)
+            elif upper > 180:
+                mask = (theta_exp >= lower) | (theta_exp <= (upper - 360))
+            else:
+                mask = (theta_exp >= lower) & (theta_exp <= upper)
+            
+            theta_fit = theta_exp[mask]
+            I_fit = I_fit_data[mask]
+        else:
+            theta_fit = theta_exp
+            I_fit = I_fit_data
+        
+        I_fit = I_fit / np.max(I_fit)
+
+        p0 = (1.0, 5.0, target, np.median(I_fit))
+        bounds = (
+            [0,    0,    target - 2,  0],
+            [np.inf, 500, target + 2, np.inf]
+        )
+
+
+        try:
+            popt, pcov = curve_fit(model_func, theta_fit, I_fit, 
+                                p0=p0, bounds=bounds, maxfev=20000)
+        except RuntimeError as e:
+            print(f"Fitting error: {e}")
+            return None
+        
+        I0_opt, m_opt, x0_opt, b_opt = popt
+        S_opt = self.compute_S(m_opt)
+        I_model = model_func(theta_exp, *popt)
+        
+        residuals = I_fit_data - I_model
+        ss_res = np.sum(residuals**2)
+        ss_tot = np.sum((I_fit_data - np.mean(I_fit_data))**2)
+        r_squared = 1 - (ss_res / ss_tot)
+        
+        if plot:
+            plt.figure(figsize=(10, 6))
+            plt.plot(theta_exp, I_exp / np.max(I_exp), 'o', 
+                    label='Experimental', alpha=0.6)
+            plt.plot(theta_exp, (I_model / np.max(I_model)) , '-', 
+                    label=f'Fit (m={m_opt:.2f}, S={S_opt:.3f}, R²={r_squared:.3f})', linewidth=2)
+            if self.chi_ff is not None:
+                plt.plot(self.chi_ff, self.I_ff / np.max(self.I_ff), '--', 
+                        label='Form factor', alpha=0.5)
+            plt.xlabel('θ (°)')
+            plt.ylabel('Normalized intensity')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.title(f'Maier-Saupe fit (x0={x0_opt:.1f}°)')
+            plt.tight_layout()
+            plt.show()
+            if processor is not None:
+                figname=f'{processor.path}/{processor.samplename}_B={processor.B}mT_Img{processor.file_number}_azimprofile_mixturefit.png'
+                plt.savefig(figname)
+                print(f' /!\ Figure saved in {figname}')
+
+
+            
+        x0_opt = (x0_opt + 180) % 360 - 180
+        from scipy.integrate import simps
+
+        # ----------------------------
+        # Reconstruction composantes
+        # ----------------------------
+        if self.chi_ff is not None and self.I_ff is not None:
+            C90 = self.convolve_with_form_factor(theta_exp, m_opt, x0_opt)
+        else:
+            theta_rad = np.radians(theta_exp)
+            C90 = self.ms_distribution(theta_rad, m_opt, x0_opt)
+
+        I_oriented = I0_opt * C90
+        I_iso      = b_opt * np.ones_like(theta_exp)
+
+        # ----------------------------
+        # Aires
+        # ----------------------------
+        A_oriented = simps(I_oriented, theta_exp)
+        A_iso      = simps(I_iso,      theta_exp)
+        A_total    = A_oriented + A_iso
+
+        # ----------------------------
+        # Poids
+        # ----------------------------
+        wparr = A_oriented / A_total
+        wiso      = A_iso / A_total
+
+        results = {
+            'I0': I0_opt,
+            'm': m_opt,
+            'x0': x0_opt,
+            'b': b_opt,
+            'S': S_opt,
+            'R2': r_squared,
+            'I_model': I_model,
+            'wparr': wparr,
+            'wiso': wiso,
+            'popt': popt,
+            'pcov': pcov 
+        }
+        relevant_items = ['S','R2','wparr','wiso']
+        for key, value in results.items():
+            if key in relevant_items:
+                print(f"{key}: {value}")
+        return results
+    
+    
+    
+    def fit_azimuthal_profile_old(self, theta_exp, I_exp, 
                              qvalue_ff = 0.034, 
                              threshold_ff = 0.001,
                              target=90.0, 
@@ -175,28 +366,9 @@ class NematicOrderCalculator:
         mask_nonzero = I_exp > 0
         theta_exp = theta_exp[mask_nonzero]
         I_fit_data = I_exp[mask_nonzero]
-
-        
-        #  pas de données -> fit impossible
-        if I_fit_data.size == 0:
-            if verbose:
-                print("⚠️ Aucun point non nul : fit annulé, S = 0")
-            return {
-                'I0': 0,
-                'm': 0,
-                'x0': target,
-                'a': 0,
-                'b': 0,
-                'S': 0.0,
-                'R2': 0.0,
-                'I_model': np.zeros_like(theta_exp),
-                'popt': None,
-                'pcov': None,}
         
         # Normalize
         I_fit_data = I_fit_data / np.max(I_fit_data)
-
-        
         
         if self.form_factor is not None:
             self.chi_ff, self.I_ff = self.form_factor.extract_azim_profile_formfactor(
