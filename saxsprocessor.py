@@ -692,7 +692,11 @@ class SAXSProcessor:
         # filtrer les points à intensité nulle
         mask = (I > 0) & (chi > -90) & (chi < 90) 
         chi = chi[mask]; I = I[mask]
-        angle = chi[np.argmax(I)]
+        if I is not None and I.size > 0:
+            angle = chi[np.argmax(I)]
+        else: 
+            angle = 0
         return angle
         #return min (angle, 180 + angle)
         
+
