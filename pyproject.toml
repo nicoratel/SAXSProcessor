@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "SAXSProcessor"
+version = "0.1.0"
+description = "Python toolkit for SAXS data reduction and analysis"
+authors = [{name = "Nicolas Ratel-Ramond"}]
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+keywords = ["SAED", "electron diffraction", "PDF", "RDF", "distribution function", "crystallography"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+    "numpy>=1.26.0,<2.0.0",
+    "scipy>=1.11.0,<2.0.0",
+    "matplotlib>=3.8.0,<4.0.0",
+    "sasmodels>=1.0.0",
+    "pyFAI>=2023.5.0",
+    "h5py>=3.0.0",
+    "tqdm>=4.60.0",
+    "ipywidgets>=8.0.0",
+    "pandas>=1.5.0",
+    "joblib>=1.0.0",
+    "fabio>=2023.0.0",
+    "bumps>=0.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/nicoratel/SAXSProcessor"
+Documentation = "https://github.com/nicoratel/SAXSProcessor/wiki"
+Repository = "https://github.com/nicoratel"
+Issues = "https://github.com/nicoratel/SAXSProcessor/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
