@@ -218,6 +218,8 @@ def detect_peaks_hybrid(q, I, dI=None,
                         fit_window_width=3,  # En nombre de FWHM
                         # Visualisation
                         verbose=True,
+                        proc= None,
+                        batch = False,
                         plot=False):
     """
     MÉTHODE HYBRIDE : Détection par dérivée seconde + Raffinement SPV.
@@ -389,6 +391,7 @@ def detect_peaks_hybrid(q, I, dI=None,
                 exp_global.feat_power_law(
                     input_attr='Iq_preprocess',
                     output_attr='Iq_preprocess',
+                    qpredetec=top_peaks_idx,
                     init_order=power_law_order,
                     order_range=power_law_range if power_law_order is None else None,
                     verbose=verbose
@@ -419,7 +422,218 @@ def detect_peaks_hybrid(q, I, dI=None,
             print(f"   → Lissage appliqué (σ={smooth_sigma})")
     
     # Données prétraitées
-    q_preprocessed, I_preprocessed, dI_preprocessed = exp_global.Iq_peakfinder.get_filtered_data()
+    q_preprocessed, I_preprocessed, dI_preprocessed = exp_global.Iq_peakfinder.get_filtered_data() 
+    exp_global.find_peaks_standard(verbose=True)
+
+    q_peaks_refined = exp_global.peaks.get_q_values('Standard')
+    print("standard", exp_global.peaks.get_q_values('Standard'))
+    
+    if q_peaks_refined is None :
+        q_peaks_refined = q_peaks_initial
+        print("Le raffinement a échoué")
+  
+    
+    
+    #exp_global.plot( curves=(['Iq_preprocess']), peaks=True, plot_type=('loglog','semilog'), legend=(True, False))
+    # =========================================================================
+    # RÉSULTATS
+    # =========================================================================
+    
+    if verbose:
+        print("\n" + "="*70)
+        print("RÉSULTATS - MÉTHODE HYBRIDE")
+        print("="*70)
+        print(f"{len(q_peaks_refined)} pic(s) raffiné(s) :\n")
+        
+        for i in range(len(q_peaks_refined)):
+            q_init = q_peaks_initial[i] if i < len(q_peaks_initial) else None
+            q_ref = q_peaks_refined[i]
+            #q_std = q_peaks_std[i]
+            #d = d_spacings[i]
+            #d_std = d_spacings_std[i]
+            
+            print(f"Pic {i+1} :")
+            if q_init is not None:
+                delta = abs(q_ref - q_init)
+                print(f"  Dérivée : q = {q_init:.4f} Å⁻¹")
+                #print(f"  SPV     : q = {q_ref:.4f} ± {q_std:.4f} Å⁻¹")
+                print(f"  Δq      : {delta:.4f} Å⁻¹ ({delta/q_init*100:.2f}%)")
+            else:
+                #print(f"  SPV     : q = {q_ref:.4f} ± {q_std:.4f} Å⁻¹")
+                print()
+            #print(f"  Distance: d = {d:.1f} ± {d_std:.1f} Å")
+            #print(f"  FWHM    : {FWHM_list[i]:.4f} Å⁻¹")
+            print()
+        
+        if power_law_order_value:
+            print(f"Loi de puissance : m = {power_law_order_value:.2f}")
+        print("="*70)
+    
+    # =========================================================================
+    # VISUALISATION
+    # =========================================================================
+    
+    if plot:
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        
+        # Plot 1: Dérivée seconde
+        ax1 = axes[0, 0]
+        ax1.plot(q_masked, inverted_d2I, 'b-', linewidth=1.5, label='-d²I/dq²')
+        ax1.plot(q_peaks_initial, inverted_d2I[top_peaks_idx], 
+                'ro', markersize=10, label='Pics détectés')
+        ax1.set_xlabel('q (Å⁻¹)', fontsize=12)
+        ax1.set_ylabel('-d²I/dq²', fontsize=12)
+        ax1.set_title('Étape 1 : Détection par Dérivée Seconde', 
+                     fontsize=13, fontweight='bold')
+        ax1.legend(fontsize=11)
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Données prétraitées + détections initiales
+        ax2 = axes[0, 1]
+        ax2.loglog(q_preprocessed, I_preprocessed, 'k-', 
+                  linewidth=1.5, alpha=0.7, label='Données prétraitées')
+        colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33']
+        for i, qp in enumerate(q_peaks_initial):
+            color = colors[i % len(colors)]
+            ax2.axvline(qp, color=color, linestyle='--', linewidth=2, 
+                       alpha=0.5, label=f'Détection {i+1}')
+        ax2.set_xlabel('q (Å⁻¹)', fontsize=12)
+        ax2.set_ylabel('I(q) [prétraitée]', fontsize=12)
+        ax2.set_title('Étape 2 : Prétraitement Global', 
+                     fontsize=13, fontweight='bold')
+        ax2.legend(fontsize=10)
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Résultats raffinés
+        ax3 = axes[1, 0]
+        ax3.loglog(q_preprocessed, I_preprocessed, 'k-', 
+                  linewidth=1.5, alpha=0.5, label='Données')
+        for i, (qp) in enumerate(q_peaks_refined):
+            color = colors[i % len(colors)]
+            ax3.axvline(qp, color=color, linestyle='-', linewidth=2.5, 
+                       label=f'Pic {i+1} (Standard)')
+        ax3.set_xlabel('q (Å⁻¹)', fontsize=12)
+        ax3.set_ylabel('I(q) [prétraitée]', fontsize=12)
+        ax3.set_title('Étape 3 : Raffinement Standard', 
+                     fontsize=13, fontweight='bold')
+        ax3.legend(fontsize=10)
+        ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: Comparaison positions
+            # Assurer format 1D
+        q_peaks_initial = np.ravel(q_peaks_initial)
+        q_peaks_refined = np.ravel(q_peaks_refined)
+
+        # Nombre de pics communs
+        n_common = min(len(q_peaks_initial), len(q_peaks_refined))
+
+        # Tronquer aux pics communs
+        q_init_common = q_peaks_initial[:n_common]
+        q_ref_common = q_peaks_refined[:n_common]
+
+        x_pos = np.arange(n_common)
+        width = 0.35
+
+        ax4 = axes[1, 1]
+
+        # Barres initiales
+        ax4.bar(
+            x_pos - width/2,
+            q_init_common,
+            width,
+            label='Dérivée (initial)',
+            alpha=0.7,
+            color='gray'
+        )
+
+        # Barres raffinées
+        ax4.bar(
+            x_pos + width/2,
+            q_ref_common,
+            width,
+            label='Standard (raffiné)',
+            alpha=0.7,
+            color='green'
+        )
+
+        ax4.set_xlabel('Numéro du Pic', fontsize=12)
+        ax4.set_ylabel('Position q (Å⁻¹)', fontsize=12)
+        ax4.set_title('Comparaison : Pics communs uniquement',
+                    fontsize=13, fontweight='bold')
+        
+        ax4.set_xticks(x_pos)
+        ax4.set_xticklabels([f'Pic {i+1}' for i in range(n_common)])
+
+        ax4.legend(fontsize=11)
+        ax4.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        import os
+        
+        outputdir = os.path.join(proc.path, "peaks")
+        os.makedirs(outputdir, exist_ok=True)
+
+        filename = (
+            f"{proc.samplename}_peaks"
+        )
+
+        filepath = os.path.join(outputdir, filename)
+
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        
+
+        print(f" Figure sauvegardée : {filepath}")
+        
+        plt.show()
+        
+        
+        '''
+        ax4 = axes[1, 1]
+        x_pos = np.arange(len(q_peaks_refined))
+        width = 0.35
+        
+        if len(q_peaks_initial) == len(q_peaks_refined):
+            ax4.bar(x_pos - width/2, q_peaks_initial, width, 
+                   label='Dérivée (initial)', alpha=0.7, color='gray')
+        
+        ax4.bar(x_pos + width/2, q_peaks_refined, width, capsize=5,
+               label='Standard (raffiné)', alpha=0.7, color='green')
+        
+        ax4.set_xlabel('Numéro du Pic', fontsize=12)
+        ax4.set_ylabel('Position q (Å⁻¹)', fontsize=12)
+        ax4.set_title('Comparaison : Dérivée vs Standard Raffiné', 
+                     fontsize=13, fontweight='bold')
+        ax4.set_xticks(x_pos)
+        ax4.set_xticklabels([f'Pic {i+1}' for i in range(len(q_peaks_refined))])
+        ax4.legend(fontsize=11)
+        ax4.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        plt.show()'''
+        
+        d_spacings = 2 * np.pi / q_peaks_refined
+        #d_spacings_std = d_spacings * (q_peaks_std / q_peaks_refined)
+    
+    # =========================================================================
+    # RETOUR
+    # =========================================================================
+    
+    results ={
+        'q_peaks': q_peaks_refined,
+        'q_peaks_std': None,
+        'q_peaks_initial': q_peaks_initial,
+        'FWHM': None,
+        'd_spacings': d_spacings,
+        'd_spacings_std': None,
+        'power_law_order': power_law_order_value,
+        'spv_params': None,
+        'method': 'hybrid',
+        'q_data': q_preprocessed,
+        'I_processed': I_preprocessed
+    }
+
+    
+    '''
     
     # =========================================================================
     # ÉTAPE 3 : RAFFINEMENT SPV LOCAL POUR CHAQUE PIC
@@ -759,7 +973,7 @@ def detect_peaks_hybrid(q, I, dI=None,
         'method': 'hybrid',
         'q_data': q_preprocessed,
         'I_processed': I_preprocessed
-    }
+    }'''
     
     return results
 
