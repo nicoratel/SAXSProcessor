@@ -244,15 +244,18 @@ class h5File_SWING:
             self.position = {'X_start': self.position_x_start, 'X_end': self.position_x_end,
                         'Z_start': self.position_z_start, 'Z_end': self.position_z_end}
             print("position moteur :")
-            print(self.position)
+            #print(self.position)
             # Calculate step_x  and step_z
             self.step_x=(self.position_x_end-self.position_x_start)/data_raw.shape[0]
-            print(self.position)
+            #print(self.position)
             self.step_z=(self.position_z_end-self.position_z_start)/data_raw.shape[1]
-            print("step :")
-            print(self.step_x)
-            print(self.step_z)
-            print(self.nb_frames)
+            #print("step :")
+            #print(self.step_x)
+            #print(self.step_z)
+            #print(self.nb_frames)
+            self.averagemi5 = f[group + '/scan_data/averagemi5'][()][()]
+            self.averagemi8a = f[group + '/scan_data/averagemi8a'][()][()]
+            
 
             #if self.step_z < 0.1:
             #    self.step_z=0  
