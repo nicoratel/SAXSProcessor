@@ -549,7 +549,7 @@ def compute_nematic_order_assembly_SWING(
         S_interp_valid_only,
         extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
         origin='lower',
-        aspect="auto",
+        aspect="equal",
         cmap=cmap2,
         interpolation='bicubic'      # ← interpolation lissée mais seulement sur zones valides
     )
@@ -559,12 +559,26 @@ def compute_nematic_order_assembly_SWING(
     #print(x_2d[valid], z_2d[valid], u, v)
 
     # flèches : uniquement sur points valides
-    ax2.quiver(x_2d[valid], z_2d[valid], u, v, color='black', scale=15)
+    if x_2d.shape[0] > x_2d.shape[1] :
+        var = 'height'
+        wid = 0.008
+    else :
+        var = 'width'
+        wid = 0.003
 
+    ax2.quiver(x_2d[valid], z_2d[valid], u, v,
+        color='black',
+        width=wid,
+        scale=40,
+        scale_units =var,
+        
+    )
     plt.colorbar(im2, ax=ax2)
-    ax2.set_title("Carte interpolée uniquement dans zones valides")
+    ax2.set_xlabel('X position (mm)', fontsize=14)
+    ax2.set_ylabel('Z position (mm)', fontsize=14)
+    ax2.set_title("Cartographie de l'ordre nématique et de l'orientation moyenne")
     ax2.invert_yaxis()
-    plt.savefig(os.path.join(outputpath, f'{safe_samplename}_S_interp_valid.png'))
+    plt.savefig(os.path.join(outputpath, f'{safe_samplename}_Cartography.png'))
     plt.show()
 
 
@@ -969,11 +983,28 @@ def plot_transmission_map_from_singleh5(h5file, proc):
     nb_lines = SWING_file.raw_data.shape[1]
     nb_columns = SWING_file.raw_data.shape[0]
 
-    x_array = np.array([SWING_file.position_x_start + j * SWING_file.step_x for j in range(nb_columns)])
+	x_array = np.array([SWING_file.position_x_start + j * SWING_file.step_x for j in range(nb_columns)])
+    #print('x',x_array)
     z_array = np.array([SWING_file.position_z_start + i * SWING_file.step_z for i in range(nb_lines)])
-    transmission_array = np.array(SWING_file.transmission).reshape((nb_lines, nb_columns))
-    #print("matrice de trans")
-    #print( transmission_array)
+    #print('z',x_array)
+    mi5 = np.matrix(SWING_file.averagemi5)
+    mi8a = np.matrix(SWING_file.averagemi8a)
+    transmission_array = mi8a / mi5
+    
+    
+    def normaliser_matrice(matrice):
+        matrice = np.array(matrice, dtype=float)  # conversion en float
+        max_val = np.max(matrice)
+        
+        if max_val == 0:
+            return matrice  # éviter division par 0
+        
+        return matrice / max_val
+    
+    transmission_array = normaliser_matrice(transmission_array)
+    transmission_array = transmission_array.T
+    #print("la transmission", transmission_array)
+    #print(transmission_array.shape)
     #print("axes")
     #print(x_array)
     #print(SWING_file.step_z)
@@ -985,8 +1016,8 @@ def plot_transmission_map_from_singleh5(h5file, proc):
         transmission_array,
         extent=[x_array.min(), x_array.max(), z_array.min(), z_array.max()],
         origin='lower',
-        aspect=nb_columns / nb_lines,
-        cmap='jet',
+        aspect="equal",
+        cmap='jet_r',
         interpolation='bicubic'
     )
     ax.set_xlabel('X position (mm)', fontsize=14)
@@ -1370,7 +1401,10 @@ def detect_peaks_hybrid_interactive(proc,
                                     distance_pts=20,
                                     power_law_order=None,
                                     subtract_power_law_init=True,
-									power_law_method = 'cancel'):
+									batch = False,
+                                    azimuth=90,
+                                    width=360,
+									power_law_method = 'feat'):
     """
     ÉTAPE 1 (Interactive) : Détection des pics avec méthode hybride et ajustement en temps réel.
     
@@ -1414,13 +1448,13 @@ def detect_peaks_hybrid_interactive(proc,
     )
     
     qmin_slider = FloatSlider(
-        value=qmin_init, min=0.01, max=0.2, step=0.005,
-        description='qmin (Å⁻¹):', style={'description_width': '120px'}
+        value=qmin_init, min=0.005, max=0.2, step=0.005,
+        description='qmin (Å⁻¹):', style={'description_width': '120px'}, readout_format='.3f' 
     )
     
     qmax_slider = FloatSlider(
         value=qmax_init, min=0.05, max=0.3, step=0.005,
-        description='qmax (Å⁻¹):', style={'description_width': '120px'}
+        description='qmax (Å⁻¹):', style={'description_width': '120px'}, readout_format='.3f' 
     )
     
     fit_window_slider = FloatSlider(
@@ -1435,7 +1469,7 @@ def detect_peaks_hybrid_interactive(proc,
     )
     
     power_law_method_dropdown = Dropdown(
-        options=['feat', 'cancel'],
+        options=['cancel', 'feat'],
         value=power_law_method,
         description='Power law method:',
         style={'description_width': '120px'}
@@ -1455,8 +1489,8 @@ def detect_peaks_hybrid_interactive(proc,
             corr = CorrelationDistanceCalculator(proc)
             distances, distances_std, hybrid_results = corr.compute_correlation_distances(
                 nb_peaks=nb_peaks,
-                azimuth=90,
-                width=360,
+                azimuth=azimuth,
+                width=width,
                 method='hybrid',
                 qmin=qmin,
                 qmax=qmax,
@@ -1468,6 +1502,8 @@ def detect_peaks_hybrid_interactive(proc,
                 fit_window_width=fit_window_width,
                 subtract_power_law=subtract_power_law,
                 verbose=False,
+				proc = proc,
+                batch = batch,
                 plot=True
             )
         
@@ -1476,7 +1512,10 @@ def detect_peaks_hybrid_interactive(proc,
             'distances': distances,
             'distances_std': distances_std,
             'hybrid_results': hybrid_results,
-            'peaklist': 2*np.pi/distances
+            'peaklist': 2*np.pi/distances,
+            'qmin' : qmin,
+            'qmax' : qmax,
+            'nombredepics' : nb_peaks
         }
         
         return last_results['data']
@@ -1512,9 +1551,10 @@ def detect_peaks_hybrid_interactive(proc,
         return last_results['data']
     
     # Afficher
-    display(controls)
-    display(output)
-    
+	if not batch:
+	    display(controls)
+	    display(output)
+	    
     # Exécuter une première fois
     update_plot(nb_peaks_init, qmin_init, qmax_init, fit_window_width_init, subtract_power_law_init, power_law_method)
     
