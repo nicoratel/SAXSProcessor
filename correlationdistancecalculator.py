@@ -58,7 +58,7 @@ class CorrelationDistanceCalculator:
                 # Raffinement SPV
                 'subtract_power_law', 'power_law_method', 'power_law_order',
                 'power_law_range', 'smooth', 'smooth_sigma',
-                'fit_window_width', 'verbose', 'plot'
+                'fit_window_width', 'verbose', 'plot', 'batch', 'outputdir'
             }
         }
     
@@ -405,7 +405,9 @@ class CorrelationDistanceCalculator:
                            power_law_range=(2.5, 4.0),
                            smooth=False,
                            smooth_sigma=2,
-                           fit_window_width=3,
+                           fit_window_width=3, 
+                           proc = None,
+                           batch = False,
                            verbose=True,
                            plot=False):
         """
@@ -454,6 +456,8 @@ class CorrelationDistanceCalculator:
             smooth=smooth,
             smooth_sigma=smooth_sigma,
             fit_window_width=fit_window_width,
+            batch = batch,
+            proc = proc,
             verbose=verbose,
             plot=plot
         )
@@ -511,6 +515,8 @@ class CorrelationDistanceCalculator:
                                      azimuth: float = 90, 
                                      width: float = 40,
                                      method='hybrid',
+                                     proc = None,
+                                     batch = False,
                                      **detection_params):
         """
         Calcule les distances de corrélation à partir du profil radial.
@@ -564,6 +570,8 @@ class CorrelationDistanceCalculator:
                 peak_results = self.detect_peaks_hybrid(
                     q, I, 
                     nb_peaks=nb_peaks,
+                    proc =proc,
+                    batch= batch,
                     **filtered_params
                 )
             else:  # spv
@@ -637,19 +645,19 @@ class CorrelationDistanceCalculator:
                 q_init = results['q_peaks_initial'][i]
                 delta = abs(q_peak - q_init)
                 print(f"  Pic {i+1}:")
-                print(f"    Dérivée : q = {q_init:.4f} Å⁻¹")
-                if 'q_peaks_std' in results:
+                print(f"    Dérivée : q = {q_init:.6f} Å⁻¹")
+                if 'q_peaks_std' in results and results['q_peaks_std'] is not None:
                     q_std = results['q_peaks_std'][i]
                     d_std = results['distances_std'][i]
                     print(f"    SPV     : q = {q_peak:.4f} ± {q_std:.4f} Å⁻¹ "
                           f"→ d = {d:.1f} ± {d_std:.1f} Å")
                     print(f"    Δq = {delta:.4f} Å⁻¹ ({delta/q_init*100:.2f}%)")
                 else:
-                    print(f"    SPV     : q = {q_peak:.4f} Å⁻¹ → d = {d:.1f} Å")
-                if 'FWHM' in results:
+                    print(f"    Standard     : q = {q_peak:.6f} Å⁻¹ → d = {d:.2f} Å")
+                if 'FWHM' in results and results['FWHM'] is not None:
                     print(f"    FWHM = {results['FWHM'][i]:.4f} Å⁻¹")
             
-            elif 'q_peaks_std' in results:
+            elif 'q_peaks_std' in results and results['q_peaks_std'] is not None:
                 q_std = results['q_peaks_std'][i]
                 d_std = results['distances_std'][i]
                 print(f"  Pic {i+1}: q = {q_peak:.4f} ± {q_std:.4f} Å⁻¹ "
