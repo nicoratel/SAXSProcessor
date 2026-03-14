@@ -201,7 +201,7 @@ class SAXSTools:
                         verbose : bool = False):
         
         # Initialize search bounds for prominence
-        low_prominence = min_prominence if not None else 1e-4
+        low_prominence = min_prominence if min_prominence is not None else 1e-6
         high_prominence =(
             max_prominence if max_prominence is not None
             else max(
@@ -450,7 +450,8 @@ class SAXSPeakInfo:
         """
         properties = properties or {}
         q_values_std = q_values_std if q_values_std is not None else q_values * 0.05
-        n = len(q_values)
+        if q_values is not None :
+            n = len(q_values)
         for key, val in properties.items():
             if len(val) != n:
                 raise ValueError(f"Length mismatch in property '{key}' (expected {n}, got {len(val)})")
@@ -941,6 +942,7 @@ class SAXSExperiment:
         self,
         init_order: int | None=None,
         order_range=None,
+        qpredetec = None,
         input_attr='Iq_preprocess',
         output_attr='Iq_preprocess',
         verbose=True
@@ -977,15 +979,18 @@ class SAXSExperiment:
         y_flatten = y * q ** 3.0
 
         try:
-            best_peaks_indices, _ = SAXSTools.find_peaks_dico(
-                y_flatten,
-                3,
-                20,
-                1e-4,
-                None,
-                False
-            )
-            #print(best_peaks_indices)
+            print(qpredetec)
+            if qpredetec is None :
+                best_peaks_indices, _ = SAXSTools.find_peaks_dico(
+                    y_flatten,
+                    3,
+                    20,
+                    1e-6,
+                    None,
+                    False
+                )
+            else :
+                best_peaks_indices = qpredetec
 
             if best_peaks_indices is None or len(best_peaks_indices) < 2:
                 raise ValueError("Not enough peaks for feat_power_law")
@@ -1050,7 +1055,7 @@ class SAXSExperiment:
 
 
             def objective(m, q, y):
-                m = float(m)
+                m = m[0]
                 y_scaled = y * q**m
 
                 mean_val = np.mean(y_scaled)
@@ -1063,7 +1068,7 @@ class SAXSExperiment:
             
 
             def constraint_equal_minima(m, q, y, f_idx, s_idx, t_idx):
-                m = float(m)
+                m = m[0]
                 y_scaled = y * q**m
 
                 min1 = np.min(y_scaled[f_idx:s_idx])
@@ -1345,7 +1350,7 @@ class SAXSExperiment:
         input_attr: Annotated[str, "Name of the attribute"]='Iq_peakfinder',
         output_attr: Annotated[str, "Name of the property to add"]='Standard',
         n_expected_peaks: Annotated[int, "Number of peaks to find"] = 3,
-        min_prominence: Annotated[float, "Minimal peak's prominence"] = 1e-4,
+        min_prominence: Annotated[float, "Minimal peak's prominence"] = 1e-6,
         max_prominence: Annotated[float  , "Maximal peak's prominence"] = None,
         max_iter: Annotated[int, "Maximum number of iterations"] = 20,
         verbose: Annotated[bool, "Activate verbose"] = False
@@ -1400,52 +1405,67 @@ class SAXSExperiment:
                         verbose)
         
         # Ensure indices are valid integers
+                # --- CAS : aucun pic détecté ---
         if best_peak_indices is None or len(best_peak_indices) == 0:
-            raise RuntimeError(f"[File:{self.name}] No peaks detected during standard peak search.")
+            
+            print(f"[File:{self.name}] ⚠ La recherche de pic a échoué.")
 
-        best_peak_indices = np.asarray(best_peak_indices, dtype=int)
+            # On stocke des valeurs None propres
+            self.peaks.set(
+                name=output_attr,
+                q_values=None,
+                q_values_std=None,
+                FWHM=None,
+                Imin=None,
+                properties=None
+            )
+
+            return self
         
-        # Calculate FWHM for each detected peak
-        FWHM = np.zeros_like(best_peak_indices, dtype=float)
-        for i, _ in enumerate(best_peak_indices):
-            left = int(np.round(best_peak_properties['left_ips'][i]))
-            right = int(np.round(best_peak_properties['right_ips'][i]))
-            peak_l_base = q[left]
-            peak_r_base = q[right]
-            FWHM[i] = peak_r_base - peak_l_base
+        else : 
+            best_peak_indices = np.asarray(best_peak_indices, dtype=int)
+            
+            # Calculate FWHM for each detected peak
+            FWHM = np.zeros_like(best_peak_indices, dtype=float)
+            for i, _ in enumerate(best_peak_indices):
+                left = int(np.round(best_peak_properties['left_ips'][i]))
+                right = int(np.round(best_peak_properties['right_ips'][i]))
+                peak_l_base = q[left]
+                peak_r_base = q[right]
+                FWHM[i] = peak_r_base - peak_l_base
 
-        # Calcule la constante Imin de la courbe 
-        if len(best_peak_indices) >= 2 :
-            # Trouver I(q_peak)
-            ind1 = best_peak_indices[0]
-            ind2 = best_peak_indices[1]
-            I_btw2peaks1 = y[ind1:ind2]  # float() pour sérialiser proprement
-            #I_btw2peaks2 = float(y[ind1:ind2])
-            I_min = np.min(I_btw2peaks1)
-            # print(ind1, ind2, I_min)
-        else :
-            if len(best_peak_indices) < 2:
+            # Calcule la constante Imin de la courbe 
+            if len(best_peak_indices) >= 2 :
+                # Trouver I(q_peak)
                 ind1 = best_peak_indices[0]
-                indd = len(y) - 1
-                I_btw2peaks = y[ind1:indd]
-                I_min = np.min(I_btw2peaks)
+                ind2 = best_peak_indices[1]
+                I_btw2peaks1 = y[ind1:ind2]  # float() pour sérialiser proprement
+                #I_btw2peaks2 = float(y[ind1:ind2])
+                I_min = np.min(I_btw2peaks1)
+                # print(ind1, ind2, I_min)
+            else :
+                if len(best_peak_indices) < 2:
+                    ind1 = best_peak_indices[0]
+                    indd = len(y) - 1
+                    I_btw2peaks = y[ind1:indd]
+                    I_min = np.min(I_btw2peaks)
 
-            else:
-                I_min = 0; 
+                else:
+                    I_min = 0; 
 
 
 
-        # Store the results in the SAXSPeakInfo object
-        self.peaks.set(
-            name=output_attr,
-            q_values=q[best_peak_indices],
-            q_values_std=dy[best_peak_indices],
-            FWHM=FWHM,
-            Imin = I_min,
-            properties=best_peak_properties
-        )
-
-        return self
+            # Store the results in the SAXSPeakInfo object
+            self.peaks.set(
+                name=output_attr,
+                q_values=q[best_peak_indices],
+                q_values_std=dy[best_peak_indices],
+                FWHM=FWHM,
+                Imin = I_min,
+                properties=best_peak_properties
+            )
+        
+            return self
     
     def find_peaks_spv(
         self,
