@@ -1,11 +1,11 @@
-from filereaders import h5File_ID02, h5File_SWING, EdfFile
+from .filereaders import h5File_ID02, h5File_SWING, EdfFile
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from scipy.signal import savgol_filter
 import fabio
 import os
-import re
+
 import math
 
 from pathlib import Path
@@ -33,7 +33,8 @@ class SAXSProcessor:
                  instrument='ID02',
                  binning: int = 1,
                  mask=None,
-                 average = True):
+                 average = True,
+                 mapping = False):
         """
         Initialize SAXS data processor.
         
@@ -54,6 +55,8 @@ class SAXSProcessor:
         mask : str
             Path to mask file (pyFAI - EDF format)
         
+        mapping : bool
+            If True, compute Q-space mapping (Q_parallel, Q_perpendicular)
         """
         self.filepath = file
         self.path = os.path.dirname(file)
@@ -136,6 +139,53 @@ class SAXSProcessor:
             if autosubstract:
                 k = self.determine_k(self.data, ref_data)
             self.data = self.data - k * ref_data
+        
+        # Store mapping parameter
+        self.mapping = mapping
+        
+        # Compute Q grids if mapping is enabled
+        if self.mapping:
+            print('Computing Q components...')
+            # Compute Q_parallel and Q_perpendicular
+            self.q_parr = np.zeros(self.data.shape, dtype='float')
+            self.q_perp = np.zeros(self.data.shape, dtype='float')
+            self.qx = np.zeros(self.data.shape, dtype='float')
+            self.qy = np.zeros(self.data.shape, dtype='float')
+            self.qz = np.zeros(self.data.shape, dtype='float')
+            self.norm_Q = np.zeros(self.data.shape, dtype='float')
+            self.thetaB = np.zeros(self.data.shape, dtype='float')
+            self.beta = np.zeros(self.data.shape, dtype='float')
+            self.phi = np.zeros(self.data.shape, dtype='float')
+            
+            phi_error = False
+            for i in range(self.num_pixel_z):
+                delta_i = (i - self.x_center) * self.pixel_size_x
+                for j in range(self.num_pixel_x):
+                    delta_j = (j - self.z_center) * self.pixel_size_z
+                    denom = (self.D ** 2 + delta_i ** 2 + delta_j ** 2) ** (1/2)
+                    a = 2 * np.pi / self.wl
+                    self.q_parr[j, i] = a * delta_i / denom  # qx
+                    self.q_perp[j, i] = (a / denom) * (delta_j ** 2 + (self.D - denom) ** 2) ** (1/2)
+                    self.qy[j, i] = (a / denom) * (self.D - denom)
+                    self.qz[j, i] = (a / denom) * delta_j
+                    self.norm_Q[j, i] = np.sqrt(self.q_parr[j, i] ** 2 + self.q_perp[j, i] ** 2)
+                    if self.norm_Q[j, i] != 0:
+                        self.thetaB[j, i] = np.arcsin(self.q_parr[j, i] / self.norm_Q[j, i]) * 180 / np.pi  # in degrees
+                        self.beta[j, i] = np.arccos(self.q_parr[j, i] / self.norm_Q[j, i]) * 180 / np.pi  # in degrees
+                    # build phi_array
+                    try:
+                        if j != self.x_center:
+                            self.phi[j, i] = 90 - (np.arctan((i - self.z_center) / (j - self.x_center)) * (180 / np.pi))
+                    except:
+                        phi_error = True
+                        pass
+            
+            if phi_error:
+                print("Some phi values could not be computed (divide by zero)")
+                print("Azimuthal profiles should be plotted against beta only")
+            
+            self.qx = self.q_parr
+            print('Q-space mapping completed.')
         
         # Apply caving if mask provided
         if mask is not None:
@@ -329,7 +379,8 @@ class SAXSProcessor:
             output_dir=None,
             rotate90=False):
         """
-        Plot 2D SAXS pattern in reciprocal space (Qx, Qz).
+        Plot 2D SAXS pattern in reciprocal space.
+        If mapping=True, plots in (Q//, Q⊥) space, otherwise in (Qx, Qz) space.
         
         Parameters:
         -----------
@@ -340,7 +391,7 @@ class SAXSProcessor:
         log : bool
             Use logarithmic scale
         grid_size : int
-            Interpolation grid size
+            Interpolation grid size (only used if mapping=False)
         vmin, vmax : float
             Color scale limits (log scale exponents if log=True)
         normalize : bool
@@ -350,8 +401,101 @@ class SAXSProcessor:
         output_dir : str
             Output directory for figure
         rotate90 : bool
-            Rotate image 90°
+            Rotate image 90° (only used if mapping=False)
         """
+        # Use mapping if available
+        if self.mapping:
+            # Plot using q_parr and q_perp (same as WAXSProcessor.plot2D)
+            # Apply mask (set masked pixels to NaN for visualization)
+            data = self.data.astype(float).copy()
+            if hasattr(self, 'maskdata'):
+                data[self.maskdata == 1] = np.nan
+            
+            # Normalize data (0–1) then clip for LogNorm
+            data = data / np.nanmax(data)
+            data = np.clip(data, 1e-12, None)
+            
+            # Handle vmin/vmax given as log10 values
+            if vmin is None:
+                vmin_val = data.min()
+            else:
+                vmin_val = 10 ** vmin
+            
+            if vmax is None:
+                vmax_val = data.max()
+            else:
+                vmax_val = 10 ** vmax
+            
+            # Make sure values are valid
+            if vmin_val <= 0:
+                vmin_val = 1e-12
+            if vmax_val <= vmin_val:
+                vmax_val = data.max()
+            
+            norm = LogNorm(vmin=vmin_val, vmax=vmax_val) if log else None
+            
+            # Prepare figure
+            fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
+            
+            # q-space mesh (convert from m⁻¹ to Å⁻¹)
+            q_parr_scaled = 1e-10 * self.q_parr
+            q_perp_scaled = 1e-10 * self.q_perp
+            
+            # Create edges for pcolormesh
+            q_parr_edges = np.zeros((q_parr_scaled.shape[0] + 1, q_parr_scaled.shape[1] + 1))
+            q_perp_edges = np.zeros((q_perp_scaled.shape[0] + 1, q_perp_scaled.shape[1] + 1))
+            
+            q_parr_edges[:-1, :-1] = q_parr_scaled
+            q_parr_edges[:-1, -1] = q_parr_scaled[:, -1]
+            q_parr_edges[-1, :-1] = q_parr_scaled[-1, :]
+            q_parr_edges[-1, -1] = q_parr_scaled[-1, -1]
+            
+            q_perp_edges[:-1, :-1] = q_perp_scaled
+            q_perp_edges[:-1, -1] = q_perp_scaled[:, -1]
+            q_perp_edges[-1, :-1] = q_perp_scaled[-1, :]
+            q_perp_edges[-1, -1] = q_perp_scaled[-1, -1]
+            
+            # Plot
+            mesh = ax.pcolormesh(q_parr_edges, q_perp_edges, data, 
+                                shading='flat', cmap=cmap, norm=norm)
+            
+            cbar = fig.colorbar(mesh, ax=ax)
+            cbar.set_label('Intensity (log scale)' if log else 'Intensity', fontsize=14)
+            
+            ax.set_xlabel(r'$q_{\parallel}$ (Å$^{-1}$)', fontsize=14)
+            ax.set_ylabel(r'$q_{\perp}$ (Å$^{-1}$)', fontsize=14)
+            ax.set_title(f'Img{self.file_number:05d}_{self.samplename}_{self.B}mT')
+            ax.set_aspect('equal')
+            
+            # Set axis limits to q_range if specified
+            if q_range is not None:
+                qmax = q_range[1]
+                ax.set_xlim(-qmax, qmax)
+                ax.set_ylim(q_range[0], qmax)
+            
+            # Add q-circles if requested
+            if q_circles is not None:
+                theta = np.linspace(0, np.pi, 200)
+                colors = ['white', 'red', 'blue', 'green', 'yellow']
+                for n, q in enumerate(q_circles):
+                    qx_circle = q * np.cos(theta)
+                    qy_circle = q * np.sin(theta)
+                    ax.plot(qx_circle, qy_circle, color=colors[n % len(colors)],
+                           linestyle='dashed', linewidth=1.5, label=f'q={q:.3f}')
+                ax.legend()
+            
+            plt.tight_layout()
+            
+            if output_dir is not None:
+                os.makedirs(output_dir, exist_ok=True)
+                figname = os.path.join(output_dir, 
+                                      f'Img{self.file_number:05d}_{self.samplename}_{self.B}mT_qspace.png')
+                plt.savefig(figname, dpi=200)
+            
+            plt.show()
+            return
+        
+        # Original method for non-mapping case
         qx, qy, qz = self.compute_q_grids()
         qnorm = np.sqrt(qx**2 + qy**2 + qz**2)
         
@@ -467,10 +611,10 @@ class SAXSProcessor:
 
     def extract_azimuthal_profile(self, qvalue, threshold = 0.0001, save=True,output_dir=None,apply_mirror=False):
         """
-        Extract the azimuthal intensity profile at a given Q value using pyFAI.
-
-        The profile is obtained by integrating the intensity over a narrow radial
-        range centered on `qvalue`, defined by the relative `threshold`.
+        Extract the azimuthal intensity profile at a given Q value.
+        
+        If mapping=True, extracts intensity as a function of beta angle.
+        If mapping=False, uses pyFAI radial integration.
 
         Parameters
         ----------
@@ -484,16 +628,84 @@ class SAXSProcessor:
         output_dir : str or None, optional
             Base directory where the profile will be saved. If None, the profile
             is saved in `<self.path>/azimuthal_profiles/`.
+        apply_mirror : bool, optional
+            Apply mirroring to the profile (only for mapping=False)
 
         Returns
         -------
-        chi : ndarray
-            Azimuthal angles in degrees.
+        angle : ndarray
+            Azimuthal angles (beta if mapping=True, chi if mapping=False) in degrees.
         I : ndarray
-            Azimuthally integrated intensity values.
+            Intensity values.
         """
         
+        # Use mapping-based extraction if available
+        if self.mapping:
+            # Extract pixels at constant Q using beta angle (similar to WAXSProcessor)
+            # Convert qvalue from Å⁻¹ to m⁻¹
+            qvalue_m = qvalue * 1e10
+            
+            # Find pixels within threshold of qvalue
+            q_min = qvalue_m * (1 - threshold)
+            q_max = qvalue_m * (1 + threshold)
+            
+            # Use norm_Q to find pixels at constant Q
+            mask = (self.norm_Q >= q_min) & (self.norm_Q <= q_max)
+            
+            # Exclude masked pixels if mask is available
+            if hasattr(self, 'maskdata'):
+                mask = mask & (self.maskdata != 1)
+            
+            beta = []
+            data = []
+            
+            # Extract beta and intensity for pixels at constant Q
+            for i in range(self.data.shape[0]):
+                for j in range(self.data.shape[1]):
+                    if mask[i, j]:
+                        beta.append(self.beta[i, j])
+                        data.append(self.data[i, j])
+            
+            # Sort by beta angle
+            if len(beta) > 0:
+                results = list(zip(beta, data))
+                results = sorted(results)
+                # Remove zero intensity (detector gaps)
+                results = [(b, d) for b, d in results if d != 0]
+                
+                if results:
+                    beta, data = zip(*results)
+                    beta = np.array(beta)
+                    data = np.array(data)
+                else:
+                    beta = np.array([])
+                    data = np.array([])
+            else:
+                beta = np.array([])
+                data = np.array([])
+            
+            # Save profile
+            if save and len(beta) > 0:
+                if output_dir is None:
+                    output_dir = os.path.join(self.path, 'azimuthal_profiles')
+                else:
+                    output_dir = os.path.join(output_dir, 'azimuthal_profiles')
+                
+                os.makedirs(output_dir, exist_ok=True)
+                
+                try:
+                    output = os.path.join(output_dir, 
+                                f'{self.samplename}_{self.B}mT_q={qvalue:.3f}_beta_Img{self.file_number:05d}_x={float(self.x):.2f}_z={float(self.z):.2f}.dat')
+                except:
+                    output = os.path.join(output_dir, 
+                                f'{self.samplename}_{self.B}mT_q={qvalue:.3f}_beta_Img{self.file_number:05d}.dat')
+                
+                np.savetxt(output, np.column_stack([beta, data]), 
+                          header='beta(degrees) Intensity', comments='')
+            
+            return beta, data
         
+        # Original pyFAI-based method
         chi, I = self.ai.integrate_radial(
             self.data, 
             540,
