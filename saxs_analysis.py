@@ -201,7 +201,7 @@ class SAXSTools:
                         verbose : bool = False):
         
         # Initialize search bounds for prominence
-        low_prominence = min_prominence if min_prominence is not None else 1e-6
+        low_prominence = min_prominence if not None else 1e-6
         high_prominence =(
             max_prominence if max_prominence is not None
             else max(
@@ -440,9 +440,9 @@ class SAXSPeakInfo:
             Array of standard deviations for the q values. If None, defaults to 5% of q_values.
         FWHM : np.array, optional
             Array of Full Width at Half Maximum (FWHM) values for the peaks. If None, it is not stored.
-        properties : dict[str, NDArray], optional
         I_min : float, optional
             Value of the minimum of intensity between the peaks
+        properties : dict[str, NDArray], optional
             Dictionary of additional properties associated with the peaks. Each key should have an array of values.
         
         Raises
@@ -451,7 +451,7 @@ class SAXSPeakInfo:
             If the length of any property array does not match the length of q_values.
         """
         properties = properties or {}
-        q_values_std = q_values_std if q_values_std is not None else q_values * 0.05
+        q_values_std = q_values_std if q_values_std is not None else q_values
         if q_values is not None :
             n = len(q_values)
         for key, val in properties.items():
@@ -983,6 +983,17 @@ class SAXSExperiment:
                 )
             else :
                 best_peaks_indices = qpredetec
+                
+            '''print("1er methode", best_peaks_indices, best_peaks_indices[1], len(best_peaks_indices))
+            #best_peaks_indices2, _ = SAXSTools.find_peaks_dico(
+                    y_flatten,
+                    3,
+                    20,
+                    1e-4,
+                    None,
+                    False
+                )
+            print("2eme methode",best_peaks_indices2)'''
 
             if best_peaks_indices is None or len(best_peaks_indices) < 2:
                 raise ValueError("Not enough peaks for feat_power_law")
@@ -1003,9 +1014,6 @@ class SAXSExperiment:
                 
             else:
                 t_idx = len(q) - 1
-            
-
-        
             
             # ===== DEBUG PLOT =====
             idx12, q12, I12 = local_min_between(y_flatten, q, f_idx, s_idx)
@@ -1330,7 +1338,8 @@ class SAXSExperiment:
                         verbose)
         
         # Ensure indices are valid integers
-                # --- CAS : aucun pic détecté ---
+
+        # --- CAS : aucun pic détecté ---
         if best_peak_indices is None or len(best_peak_indices) == 0:
             
             print(f"[File:{self.name}] ⚠ La recherche de pic a échoué.")
@@ -1348,6 +1357,7 @@ class SAXSExperiment:
             return self
         
         else : 
+
             best_peak_indices = np.asarray(best_peak_indices, dtype=int)
             
             # Calculate FWHM for each detected peak
@@ -1389,7 +1399,7 @@ class SAXSExperiment:
                 Imin = I_min,
                 properties=best_peak_properties
             )
-        
+
             return self
     
     def find_peaks_spv(
@@ -3088,24 +3098,16 @@ class PreprocessPipeline:
                 exp.cancel_power_law(
                     order_range=(2.5, 5.0),
                     input_attr='Iq_preprocess',
-                    output_attr='Iq_wo_pl'
+                    output_attr='Iq_preprocess'
                 )
-                order = exp.Iq_wo_pl.infos['order'] # Extract fitted order
+                order = exp.Iq_preprocess.infos['order'] # Extract fitted order
                 exp.metadata['power_law_order'] = order
-                order = exp.Iq_wo_pl.infos['order']
-                IntensityMin = exp.Iq_wo_pl.infos['Intmin']
+                order = exp.Iq_preprocess.infos['order']
+                IntensityMin = exp.Iq_preprocess.infos['Intmin']
 
 
                 exp.metadata['power_law_order'] = order
                 exp.metadata['Intensity_min'] = IntensityMin
-
-                print(f'l ordre est de {order}')
-                exp.apply_masks() # Clear or re-apply default masks
-                exp.cancel_power_law(
-                    init_order=order,
-                    input_attr='Iq_preprocess',
-                    output_attr='Iq_preprocess',
-                )
                 avg_order += order/n # Accumulate average order, but applied separately here
 
         if verbose:
@@ -3293,7 +3295,7 @@ class AnalysisPipeline:
     
     def IMax(self) -> dict:
         """
-        Retrieve the Intensity of all the q_values of detected peaks for all experiments and methods.
+        Retrieve the Intensity of all the q_values of detected peaks for all experiments and method standard.
 
         Returns
         -------
