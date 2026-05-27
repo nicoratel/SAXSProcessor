@@ -441,6 +441,8 @@ class SAXSPeakInfo:
         FWHM : np.array, optional
             Array of Full Width at Half Maximum (FWHM) values for the peaks. If None, it is not stored.
         properties : dict[str, NDArray], optional
+        I_min : float, optional
+            Value of the minimum of intensity between the peaks
             Dictionary of additional properties associated with the peaks. Each key should have an array of values.
         
         Raises
@@ -965,21 +967,11 @@ class SAXSExperiment:
                 }
                 self.add_data(output_attr, q, y, dy, infos)
                 return self
-            else:
-                p0 = [init_order]
-                bounds = [order_range]
-        else:
-            if order_range is not None:
-                p0 = [sum(order_range)/len(order_range)]
-                bounds = [order_range]
-            else:
-                p0 = 3.5
-                bounds = [(2.5, 4.0)]
 
         y_flatten = y * q ** 3.0
 
         try:
-            print(qpredetec)
+            #print(qpredetec)
             if qpredetec is None :
                 best_peaks_indices, _ = SAXSTools.find_peaks_dico(
                     y_flatten,
@@ -1012,10 +1004,6 @@ class SAXSExperiment:
             else:
                 t_idx = len(q) - 1
             
-            
-            # FInd local minimum between first and second and second and third peaks
-            f_min = np.min(y_flatten[f_idx:s_idx])
-            s_min = np.min(y_flatten[s_idx:t_idx])
 
         
             
@@ -1268,69 +1256,6 @@ class SAXSExperiment:
 
         if not result.success:
             raise RuntimeError("Power law cancel failed: " + result.message)
-        
-        """
-        def model(x, m):
-        return x ** m 
-
-        def loss(m, x, y):
-            y_scaled = y * model(x, m)
-            mean_val = np.mean(y_scaled)
-            eps = 1e-12
-
-            num = np.abs(y_scaled - mean_val)
-            den = np.abs(y_scaled + mean_val) + eps
-
-            print("q min/max =", q.min(), q.max())
-            print("y min/max =", y.min(), y.max())
-
-            return np.sum(num / den)
-        
-        result = minimize(
-            loss,
-            p0,
-            method='L-BFGS-B',   # Powell → incompatible avec bounds
-            args=(q, y),
-            bounds=bounds,
-            options={'disp': verbose}
-        )
-
-        if not result.success:
-            raise RuntimeError("Power law cancel failed: " + result.message) 
-
-        q, y, dy = attr_data.get_filtered_data()
-
-        # Protection contre y == 0
-        y = np.clip(y, 1e-12, None)
-
-        def loss(m, x, y):
-            eps = 1e-12
-
-            # Clamp interne pour éviter les excursions
-            m = float(np.clip(m, bounds[0][0], bounds[0][1]))
-
-            y_scaled = y * (x**m + eps)
-            mean_val = np.mean(y_scaled)
-
-            num = np.abs(y_scaled - mean_val)
-            den = np.abs(y_scaled + mean_val) + eps
-
-            print("q min/max =", q.min(), q.max())
-            print("y min/max =", y.min(), y.max())
-
-            return np.sum(num / den)
-
-        result = minimize(
-            loss,
-            p0,
-            args=(q, y),
-            method='L-BFGS-B',
-            bounds=bounds,
-            options={'disp': verbose}
-        )
-
-        if not result.success:
-            raise RuntimeError("Power law cancel failed: " + result.message)"""
         
         opt_order = result.x[0]
 
