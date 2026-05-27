@@ -290,9 +290,9 @@ class h5File_SWING:
         self.num_pixel_z = data.shape[-1]
         self.Pts_x = data.shape[0]
         self.Pts_z = data.shape[1]
-        print("info")
-        print(self.Pts_x)
-        print(self.Pts_z)
+        #print("info")
+        #print(self.Pts_x)
+        #print(self.Pts_z)
         return data
     
 
