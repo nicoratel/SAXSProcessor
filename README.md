@@ -3,13 +3,15 @@
 This repository contains complementary Python modules designed for Small-Angle X-ray Scattering (SAXS) data analysis.  
 Together, they provide tools for detector-corrected preprocessing, azimuthal/radial integration, nematic order parameter extraction, and correlation distance analysis.
 
-### Note to the user: The library is designed to unwrap images contained in a h5 file, and to average them. In case you do not wish to average your data (e.g. spatial scans), please refer to µSAXS case, described in Workflow_microSAXS.ipynb.
+
 ---
 
 # Module Overview
 
 ## 1. `saxsprocessor.py` — Core SAXS Data Processing Engine  
 The `SAXSProcessor` class provides a unified interface to load and process 2D SAXS detector images from several beamlines (ID02, SWING, LGC).  
+In case of multiple frames stored in a single file, use 'frame' argument to select the index of the desired frame (pass frame = 0 for first frame), or pass frame='mean' if you want to consider the average of stored frames.
+
 It handles:
 
 ### Key Features
