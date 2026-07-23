@@ -18,7 +18,7 @@ Example of use:
                             mask = '/path/to/maskfile',
                             reference_file = '/path/to/ref_file',
                             frame = 'mean',
-                            instrument='ID02)`
+                            instrument='ID02')`
 
 
 
