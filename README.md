@@ -10,12 +10,20 @@ Together, they provide tools for detector-corrected preprocessing, azimuthal/rad
 
 ## 1. `saxsprocessor.py` — Core SAXS Data Processing Engine  
 The `SAXSProcessor` class provides a unified interface to load and process 2D SAXS detector images from several beamlines (ID02, SWING, LGC).  
-In case of multiple frames stored in a single file, use 'frame' argument to select the index of the desired frame (pass frame = 0 for first frame), or pass frame='mean' if you want to consider the average of stored frames.
 
-It handles:
+**Important note: In case of multiple frames stored in a single file, use 'frame' argument to select the index of the desired frame (pass frame = 0 for first frame), or pass frame='mean' if you want to consider the average of stored frames.**
+
+Example of use:
+`processor = SAXSProcessor (file = '/path/to/h5datafile', 
+                            mask = '/path/to/maskfile',
+                            reference_file = '/path/to/ref_file',
+                            frame = 'mean',
+                            instrument='ID02)`
+
+
 
 ### Key Features
-- Reading EIGER / HDF5 / EDF data via dedicated file readers.
+- Reading EIGER / HDF5 / EDF data via dedicated file readers (see filereaders for supported dataformats or to add additional formats)
 - Automatic background subtraction with optimized scaling factor *k*.
 - Pixel binning.
 - Beam-stop / dead-pixel masking and mask-based “caving”.
