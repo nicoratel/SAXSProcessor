@@ -3,18 +3,18 @@ CorrelationDistanceCalculator amélioré avec méthode SPV
 Intégration de la détection de pics par Split Pseudo-Voigt
 """
 
-from filereaders import h5File_ID02, h5File_SWING, EdfFile
+from .filereaders import h5File_ID02, h5File_SWING, EdfFile
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
-from saxsprocessor import SAXSProcessor
+from .saxsprocessor import SAXSProcessor
 from pathlib import Path
 
 from scipy.signal import savgol_filter, find_peaks
 from scipy.ndimage import gaussian_filter1d
 
 # Import de la classe SAXSExperiment pour la méthode SPV
-from saxs_analysis import SAXSExperiment
+from .saxs_analysis import SAXSExperiment
 
 
 class CorrelationDistanceCalculator:
@@ -29,7 +29,7 @@ class CorrelationDistanceCalculator:
     - Comparaison avec la méthode historique (dérivée seconde)
     """
     
-    def __init__(self, processor: SAXSProcessor):
+    def __init__(self, processor: SAXSProcessor,export_preprocessed=False):
         """
         Initialize correlation distance calculator.
         
@@ -39,6 +39,7 @@ class CorrelationDistanceCalculator:
             Instance du processeur SAXS
         """
         self.processor = processor
+        self.export_preprocessed = export_preprocessed  # Par défaut, ne pas exporter les données prétraitées
         
         # Définir les paramètres valides pour chaque méthode de détection
         self._valid_params = {
@@ -436,10 +437,10 @@ class CorrelationDistanceCalculator:
         results : dict avec positions raffinées et incertitudes
         """
         # Import de la fonction hybrid
-        from utilities import detect_peaks_hybrid as hybrid_func
+        from .utilities import detect_peaks_hybrid as hybrid_func
         
         return hybrid_func(
-            q, I, dI,
+            q, I, dI,export_preprocessed=self.export_preprocessed if hasattr(self, 'export_preprocessed') else False,
             nb_peaks=nb_peaks,
             qmin=qmin,
             qmax=qmax,
@@ -561,11 +562,19 @@ class CorrelationDistanceCalculator:
         # Détecter pics avec la méthode choisie
         if method.lower() in ['hybrid', 'spv']:
             if method.lower() == 'hybrid':
-                peak_results = self.detect_peaks_hybrid(
-                    q, I, 
-                    nb_peaks=nb_peaks,
-                    **filtered_params
-                )
+                if self.export_preprocessed:
+                    peak_results, q_preprocessed, I_preprocessed = self.detect_peaks_hybrid(
+                        q, I, 
+                        nb_peaks=nb_peaks,
+                        **filtered_params
+                    )
+                else:
+                    peak_results = self.detect_peaks_hybrid(
+                        q, I, 
+                        nb_peaks=nb_peaks,
+                        **filtered_params
+                    ) 
+
             else:  # spv
                 peak_results = self.detect_peaks_spv(
                     q, I, 
@@ -663,9 +672,20 @@ class CorrelationDistanceCalculator:
             print(f"\nOrdre loi de puissance : m = {results['power_law_order']:.2f}")
         
         print(f"{'=' * 70}")
-        
-        return results['distances'], results['distances_std'] if method.lower() in ['spv', 'hybrid'] else None, results
-    
+        if self.export_preprocessed:
+            return (
+                results['distances'],
+                results['distances_std'],
+                q_preprocessed if method.lower() in ['spv', 'hybrid'] else None,
+                I_preprocessed if method.lower() in ['spv', 'hybrid'] else None,
+                results,
+            )
+        else:
+            return (
+                results['distances'],
+                results['distances_std'] if method.lower() in ['spv', 'hybrid'] else None,
+                results,
+    )
     # =========================================================================
     # ANALYSE D'ANISOTROPIE - Version améliorée
     # =========================================================================

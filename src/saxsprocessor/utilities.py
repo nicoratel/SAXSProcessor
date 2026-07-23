@@ -1,9 +1,9 @@
-from nematicordercalculator import CylinderFormFactor,NematicOrderCalculator
+from .nematicordercalculator import CylinderFormFactor,NematicOrderCalculator
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter, find_peaks
 from scipy.ndimage import gaussian_filter1d
-from saxs_analysis import SAXSExperiment
+from .saxs_analysis import SAXSExperiment
 
 
 def detect_incomplete_azimuthal_profile(chi, I_az, threshold=0.1):
@@ -184,6 +184,7 @@ MÉTHODE HYBRIDE : Détection par dérivée + Raffinement SPV
 
 
 def detect_peaks_hybrid(q, I, dI=None,
+                        export_preprocessed=False,
                         nb_peaks=1,
                         qmin=None,
                         qmax=None,
@@ -745,8 +746,148 @@ def detect_peaks_hybrid(q, I, dI=None,
         'q_data': q_preprocessed,
         'I_processed': I_preprocessed
     }
+    if export_preprocessed:
+        return results, q_preprocessed, I_preprocessed
+    else:
+        return results
+
+
+def compute_correlation_distances(processor,
+                                  export_preprocessed=False,
+                                  azimuth=90,
+                                  width=360,
+                                  nb_peaks=1,
+                                  qmin=None,
+                                  qmax=None,
+                                  method = 'hybrid',
+                                  # Paramètres de détection initiale (dérivée)
+                                  window_length=15,
+                                  polyorder=3,
+                                  prominence=0.5,
+                                  distance_pts=20,
+                                  # Paramètres de raffinement SPV
+                                  subtract_power_law=True,
+                                  power_law_method='cancel',
+                                  power_law_order=None,
+                                  power_law_range=(2.5, 4.0),
+                                  smooth=False,
+                                  smooth_sigma=2,
+                                  # Paramètres de fit local
+                                  fit_window_width=3,  # En nombre de FWHM
+                                  # Visualisation
+                                  verbose=True,
+                                  proc= None,
+                                  batch = False,
+                                  plot=False,
+                                  #outputdir=None
+                                  ):
+    """Compute correlation distances for SAXS data.
     
-    return results
+    Parameters:
+    -----------
+    processor : SAXSProcessor instance
+        Instance de SAXSProcessor contenant les données.
+    export_preprocessed : bool, default=False
+        Exporter les données prétraitées (q, I) pour inspection.
+    nb_peaks : int
+        Nombre de pics à détecter
+    qmin, qmax : float, optional
+        Limites en q
+    method : str, default='hybrid'
+        Méthode de détection : 'hybrid' ou 'derivative' ou 'spv'
+        
+    # Détection initiale
+    window_length : int, default=15
+        Fenêtre Savitzky-Golay (impair)
+    polyorder : int, default=3
+        Ordre polynomial
+    prominence : float, default=0.5
+        Prominence minimale
+    distance_pts : int, default=20
+        Distance minimale entre pics (points)
+        
+    # Raffinement SPV
+    subtract_power_law : bool, default=True
+        Soustraire loi de puissance
+    power_law_method : str, default='cancel'
+        'cancel' ou 'feat'
+    power_law_order : float, optional
+        Ordre m (None=auto)
+    power_law_range : tuple, default=(2.5, 4.0)
+        Plage pour m
+    smooth : bool, default=False
+        Lissage gaussien
+    smooth_sigma : float, default=2
+        Paramètre lissage
+    fit_window_width : float, default=3
+        Largeur fenêtre de fit en nombre de FWHM estimés
+        
+    # Visualisation
+    verbose : bool, default=True
+        Afficher détails
+    plot : bool, default=False
+        Graphiques
+    """
+    from .correlationdistancecalculator import CorrelationDistanceCalculator
+    corr= CorrelationDistanceCalculator(processor = processor, export_preprocessed=export_preprocessed) 
+    
+    if export_preprocessed:
+        distances, err , q_sub, I_sub, _ = corr.compute_correlation_distances(
+                nb_peaks=nb_peaks,
+                azimuth=azimuth,
+                width=width,
+                plot=plot,
+                qmax=qmax,
+                qmin=qmin,
+                proc = processor,
+                
+                # method specific parameters
+                method=method, # or 'derivative' or 'spv'
+                window_length=window_length, # savitzky-golay filter window length
+                polyorder=polyorder, # savitzky-golay filter polynomial order
+                prominence=prominence, # peak prominence definded in scipy find_peaks
+                distance_pts=distance_pts,  # minimal distance between peaks in number of points 
+                subtract_power_law=subtract_power_law, # subtract power law background before peak detection
+                power_law_method=power_law_method, # method to subtract power law background ('cancel' or 'feat')
+                power_law_order=power_law_order, # order of the power law background (None for automatic estimation)
+                power_law_range=power_law_range, # range of q values to estimate the power law background
+                smooth=smooth, # apply gaussian smoothing before peak detection
+                smooth_sigma=smooth_sigma, # sigma of the gaussian smoothing
+                fit_window_width=fit_window_width, # width of the fitting window around each detected peak (in 1/A)
+                verbose=verbose,
+                batch=batch,
+                #outputdir=outputdir
+            )
+        return distances, err , q_sub, I_sub
+    else:
+        distances, err , _ = corr.compute_correlation_distances(
+                nb_peaks=nb_peaks,
+                azimuth=azimuth,
+                width=width,
+                plot=plot,
+                qmax=qmax,
+                qmin=qmin,
+                proc = processor,
+                
+                # method specific parameters
+                method=method, # or 'derivative' or 'spv'
+                window_length=window_length, # savitzky-golay filter window length
+                polyorder=polyorder, # savitzky-golay filter polynomial order
+                prominence=prominence, # peak prominence definded in scipy find_peaks
+                distance_pts=distance_pts,  # minimal distance between peaks in number of points 
+                subtract_power_law=subtract_power_law, # subtract power law background before peak detection
+                power_law_method=power_law_method, # method to subtract power law background ('cancel' or 'feat')
+                power_law_order=power_law_order, # order of the power law background (None for automatic estimation)
+                power_law_range=power_law_range, # range of q values to estimate the power law background
+                smooth=smooth, # apply gaussian smoothing before peak detection
+                smooth_sigma=smooth_sigma, # sigma of the gaussian smoothing
+                fit_window_width=fit_window_width, # width of the fitting window around each detected peak (in 1/A)
+                verbose=verbose,
+                batch=batch,
+                #outputdir=outputdir
+            )
+        return distances, err
+
 
 
 

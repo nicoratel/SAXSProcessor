@@ -15,7 +15,7 @@ from scipy.interpolate import interp1d, griddata
 import pandas as pd
 
 # PyFAI imports
-from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
+from pyFAI.integrator.azimuthal import AzimuthalIntegrator
 import pyFAI.detectors
 
 
@@ -31,6 +31,7 @@ class SAXSProcessor:
                  k =1,
                  autosubstract: bool = True,
                  instrument='ID02',
+                 frame = 'mean',
                  binning: int = 1,
                  mask=None,
                  average = True,
@@ -50,6 +51,8 @@ class SAXSProcessor:
             Automatic determination of k factor for reference subtraction
         instrument : str
             'ID02', 'SWING', or 'LGC'
+        frame : int or 'mean'
+            index of frame to consider or data average if 'mean'
         binning : int
             Downsampling factor
         mask : str
@@ -69,7 +72,7 @@ class SAXSProcessor:
             self.file = EdfFile(file)
             self.reffile = EdfFile(reference_file) if reference_file else None
         elif instrument == 'SWING':
-            self.file = h5File_SWING(file)
+            self.file = h5File_SWING(file, frame = frame)
             self.reffile = h5File_SWING(reference_file) if reference_file else None
                         
         else:
@@ -123,7 +126,12 @@ class SAXSProcessor:
             self.maskdata = np.zeros_like(self.data)   
         # Average frames if needed
         if len(self.data.shape) == 3:
-            self.data = np.mean(self.data, axis=0)
+            if frame == 'mean':
+                print('SAXSProcessor uses data average')
+                self.data = np.mean(self.data, axis=0)
+            else:
+                print(f'Extraction of frame #{frame}/{self.data.shape[0]}')
+                self.data = self.data[frame] 
 
         # build pyFAI azimuthal integrator
         detector = pyFAI.detectors.Detector(pixel1=self.pixel_size_x, pixel2=self.pixel_size_z)
@@ -187,14 +195,36 @@ class SAXSProcessor:
             self.qx = self.q_parr
             print('Q-space mapping completed.')
         
-        # Apply caving if mask provided
-        if mask is not None:
-            if mask.split('.')[-1] == 'edf':  
-                self.apply_caving()
-            else:
-                print('Please provide a mask file edited with pyFAI and saved with ".edf" file extension')
+        
 
           
+    def update_ai(self, x_center = None, z_center = None, D = None):
+        """
+        Update the pyFAI azimuthal integrator with new parameters.
+        
+        Parameters:
+        -----------
+        x_center : float
+            New x center (in pixels)
+        z_center : float
+            New z center (in pixels)
+        D : float
+            New sample-detector distance (in meters)
+        """
+        if x_center is not None:
+            self.x_center = x_center
+        if z_center is not None:
+            self.z_center = z_center
+        if D is not None:
+            self.D = D
+        
+        poni1 = self.pixel_size_z * self.z_center
+        poni2 = self.pixel_size_x * self.x_center
+        
+        detector = pyFAI.detectors.Detector(pixel1=self.pixel_size_x, pixel2=self.pixel_size_z)
+        
+        self.ai = AzimuthalIntegrator(poni1=poni1, poni2=poni2, dist=self.D, detector=detector, wavelength=self.wl)
+    
     def determine_k(self, data, ref_data):
         """
         Determine optimal k factor for reference subtraction.
@@ -243,6 +273,9 @@ class SAXSProcessor:
         max_iter : int
             Maximum number of iterations
         """
+        if not hasattr(self, '_original_maskdata'):
+            self._original_maskdata = self.maskdata.copy()
+        self.maskdata = self._original_maskdata.copy()
         self.data = np.where(self.maskdata == 1.0, np.nan, self.data)
 
         for it in range(max_iter):
@@ -376,6 +409,7 @@ class SAXSProcessor:
             vmin=-4, vmax=0,
             normalize=True,
             q_circles=None,
+            q_circles_labels=True,
             output_dir=None,
             rotate90=False):
         """
@@ -403,6 +437,14 @@ class SAXSProcessor:
         rotate90 : bool
             Rotate image 90° (only used if mapping=False)
         """
+        
+        # Apply caving if mask provided
+        if self.mask is not None:
+            if self.mask.split('.')[-1] == 'edf':  
+                self.apply_caving()
+            else:
+                print('Please provide a mask file edited with pyFAI and saved with ".edf" file extension')
+        
         # Use mapping if available
         if self.mapping:
             # Plot using q_parr and q_perp (same as WAXSProcessor.plot2D)
@@ -495,96 +537,118 @@ class SAXSProcessor:
             plt.show()
             return
         
-        # Original method for non-mapping case
-        qx, qy, qz = self.compute_q_grids()
-        qnorm = np.sqrt(qx**2 + qy**2 + qz**2)
         
-        if q_range is not None:
-            qmin, qmax = q_range
-            mask = (qx >= -qmax) & (qx <= qmax) & (qz >= -qmax) & (qz <= qmax)
-            qx_masked, qz_masked, intensity = qx[mask], qz[mask], self.data[mask]
         else:
-            qx_masked, qz_masked, intensity = qx.flatten(), qz.flatten(), self.data.flatten()
-
-        if normalize:
-            intensity = intensity / np.nanmax(intensity)
-
-        if len(qx_masked) < 4:
-            plt.figure(figsize=(6, 6))
-            sc = plt.scatter(qx_masked, qz_masked, c=intensity, cmap=cmap, vmin=vmin, vmax=vmax)
-            plt.xlabel("$Q_x$ (Å⁻¹)")
-            plt.ylabel("$Q_z$ (Å⁻¹)")
-            plt.colorbar(sc, label="Normalized Intensity" if normalize else "Intensity")
-            plt.gca().set_aspect('equal')
-            plt.show()
-            return
-
-        qx_lin = np.linspace(qx_masked.min(), qx_masked.max(), grid_size)
-        qz_lin = np.linspace(qz_masked.min(), qz_masked.max(), grid_size)
-        QX, QZ = np.meshgrid(qx_lin, qz_lin)
-        Z = griddata((qx_masked, qz_masked), intensity, (QX, QZ), method='linear')
-        
-        if rotate90:
-            Z = np.rot90(Z, k=-1)
-            QZ, QX = np.rot90(QX, k=-1), np.rot90(QZ, k=-1)
-
-        fig = plt.figure(dpi=150)
-        ax = plt.gca()
-        
-        norm = LogNorm(vmin=10**vmin, vmax=10**vmax) if log else None
-        mesh = plt.pcolormesh(QX, -QZ, Z, shading='auto', cmap=cmap, norm=norm)
-        plt.xlabel(r"$Q_x$ (Å$^{-1}$)", fontsize=12)
-        plt.ylabel(r"$Q_z$ (Å$^{-1}$)", fontsize=12)
-        cbar = plt.colorbar(mesh, shrink=0.5, aspect=20)
-        cbar.set_label("Normalized Intensity" if normalize else "Intensity", fontsize=12)
-        cbar.ax.tick_params(labelsize=12)
-        plt.gca().set_aspect('equal')
-        
-        # Ajout du format_coord pour afficher q, d et θ dans la barre de statut
-        def format_coord(x, y):
-            r = np.sqrt(x**2 + y**2)
-            theta = np.degrees(np.arctan2(y, x))
-            if r > 0:
-                d = 2.0 * np.pi / (10.0 * r)
-                return f"q={r:.4f} Å⁻¹, d={d:.4f} nm, chi={theta:.1f}°"
+            # Original method for non-mapping case
+            qx, qy, qz = self.compute_q_grids()
+            qnorm = np.sqrt(qx**2 + qy**2 + qz**2)
+            
+            if q_range is not None:
+                qmin, qmax = q_range
+                mask = (qx >= -qmax) & (qx <= qmax) & (qz >= -qmax) & (qz <= qmax)
+                qx_masked, qz_masked, intensity = qx[mask], qz[mask], self.data[mask]
             else:
-                return f"q={r:.4f} Å⁻¹, chi={theta:.1f}°"
+                qx_masked, qz_masked, intensity = qx.flatten(), qz.flatten(), self.data.flatten()
+
+            if normalize:
+                intensity = intensity / np.nanmax(intensity)
+
+            if len(qx_masked) < 4:
+                plt.figure(figsize=(6, 6))
+                sc = plt.scatter(qx_masked, qz_masked, c=intensity, cmap=cmap, vmin=vmin, vmax=vmax)
+                plt.xlabel("$Q_x$ (Å⁻¹)")
+                plt.ylabel("$Q_z$ (Å⁻¹)")
+                plt.colorbar(sc, label="Normalized Intensity" if normalize else "Intensity")
+                plt.gca().set_aspect('equal')
+                plt.show()
+                return
+
+            qx_lin = np.linspace(qx_masked.min(), qx_masked.max(), grid_size)
+            qz_lin = np.linspace(qz_masked.min(), qz_masked.max(), grid_size)
+            QX, QZ = np.meshgrid(qx_lin, qz_lin)
+            Z = griddata((qx_masked, qz_masked), intensity, (QX, QZ), method='linear')
+            
+            if rotate90:
+                Z = np.rot90(Z, k=-1)
+                QZ, QX = np.rot90(QX, k=-1), np.rot90(QZ, k=-1)
+
+            fig = plt.figure(dpi=150)
+            ax = plt.gca()
+            
+            norm = LogNorm(vmin=10**vmin, vmax=10**vmax) if log else None
+            mesh = plt.pcolormesh(QX, -QZ, Z, shading='auto', cmap=cmap, norm=norm)
+            plt.xlabel(r"$Q_x$ (Å$^{-1}$)", fontsize=12)
+            plt.ylabel(r"$Q_z$ (Å$^{-1}$)", fontsize=12)
+            cbar = plt.colorbar(mesh, shrink=0.5, aspect=20)
+            cbar.set_label("Normalized Intensity" if normalize else "Intensity", fontsize=12)
+            cbar.ax.tick_params(labelsize=12)
+            plt.gca().set_aspect('equal')
         
-        ax.format_coord = format_coord
-        
-        if q_circles is not None:
-            colors = ['black', 'purple', 'pink', 'palegreen']
-            xmin, xmax = sorted(ax.get_xlim())
-            ymin, ymax = sorted(ax.get_ylim())
+            # Ajout du format_coord pour afficher q, d et θ dans la barre de statut
+            def format_coord(x, y):
+                r = np.sqrt(x**2 + y**2)
+                theta = np.degrees(np.arctan2(y, x))
+                if r > 0:
+                    d = 2.0 * np.pi / (10.0 * r)
+                    return f"q={r:.4f} Å⁻¹, d={d:.4f} nm, chi={theta:.1f}°"
+                else:
+                    return f"q={r:.4f} Å⁻¹, chi={theta:.1f}°"
+            
+            ax.format_coord = format_coord
+            
+            if q_circles is not None:
+                colors = ['black', 'purple', 'pink', 'palegreen']
+                xmin, xmax = sorted(ax.get_xlim())
+                ymin, ymax = sorted(ax.get_ylim())
 
-            for i, q_val in enumerate(q_circles):
-                theta = np.linspace(0, 2*np.pi, 2000)
-                x_circle = q_val * np.cos(theta)
-                y_circle = -q_val * np.sin(theta)
+                for i, q_val in enumerate(q_circles):
+                    theta = np.linspace(0, 2*np.pi, 2000)
+                    x_circle = q_val * np.cos(theta)
+                    y_circle = -q_val * np.sin(theta)
 
-                mask = (x_circle >= xmin) & (x_circle <= xmax) & (y_circle >= ymin) & (y_circle <= ymax)
+                    mask = (x_circle >= xmin) & (x_circle <= xmax) & (y_circle >= ymin) & (y_circle <= ymax)
 
-                if not np.any(mask):
-                    continue
+                    if not np.any(mask):
+                        continue
 
-                ax.plot(x_circle[mask], y_circle[mask],
-                    linestyle='dashed', color=colors[i % len(colors)], linewidth=2)
+                    ax.plot(x_circle[mask], y_circle[mask],
+                        linestyle='dashed', color=colors[i % len(colors)], linewidth=2)
 
-                x_text = -q_val
-                y_text = q_val * (-1)**i
-                if x_text < xmin or x_text > xmax:
-                    x_text = -x_text
-                if y_text < ymin or y_text > ymax:
-                    y_text = -y_text
+                    x_text = -q_val
+                    y_text = q_val * (-0.8)**i
+                    if x_text < xmin or x_text > xmax:
+                        x_text = -x_text
+                    if y_text < ymin or y_text > ymax:
+                        y_text = -y_text
 
-                y_offset = 0.002
-                ax.text(x_text, y_text + y_offset, f"{q_val:.3f}",
-                    color=colors[i % len(colors)], fontsize=10,
-                    ha='center', va='bottom',
-                    bbox=dict(facecolor='white', alpha=1, edgecolor='none', pad=1),
-                    clip_on=True)
+                    y_offset = 0.002
+                    if q_circles_labels:
+                        ax.text(x_text, y_text + y_offset, f"{q_val:.3f}",
+                            color=colors[i % len(colors)], fontsize=10,
+                            ha='center', va='bottom',
+                            bbox=dict(facecolor='white', alpha=1, edgecolor='none', pad=1),
+                            clip_on=True)
                     
-        plt.tight_layout()
+            plt.tight_layout()
+        
+        
+
+        # Sauvegarde de l'image
+        if output_dir is None:
+            output_dir = self.path + '/saxs_images/'
+        else:
+            output_dir += '/saxs_images/'
+        os.makedirs(output_dir, exist_ok=True)
+
+        figname = os.path.join(output_dir, f'{self.samplename}_Img_{self.file_number}')
+        if q_circles is not None:
+            figname += '_with_q-circles'
+        figname += '.png'
+
+        fig.savefig(figname, dpi=200, bbox_inches='tight')
+        print(f'✅ SAXS image saved: {figname}')
+        # Affichage dans le notebook
+        plt.show()
         
         
 
@@ -638,6 +702,12 @@ class SAXSProcessor:
         I : ndarray
             Intensity values.
         """
+        # Apply caving if mask provided
+        if self.mask is not None:
+            if self.mask.split('.')[-1] == 'edf':  
+                self.apply_caving()
+            else:
+                print('Please provide a mask file edited with pyFAI and saved with ".edf" file extension')
         
         # Use mapping-based extraction if available
         if self.mapping:

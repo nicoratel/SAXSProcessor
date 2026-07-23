@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm.notebook import tqdm
 from IPython.display import clear_output, display, Markdown
 from scipy.interpolate import griddata
-from utilities import compute_nematic_parameter
+from .utilities import compute_nematic_parameter
 import multiprocessing
 from joblib import Parallel, delayed
 from .correlationdistancecalculator import CorrelationDistanceCalculator
@@ -114,7 +114,7 @@ def view_position_grid(
     if verbose:
         print(f"\nReference file: {os.path.basename(reference_file)}")
     
-    swing_ref = h5File_SWING(file=reference_file, mean=True)
+    swing_ref = h5File_SWING(file=reference_file, frame = 'mean')
     basler_ref = swing_ref.basler_image
     
     # Extract positions from all files and frames
@@ -132,10 +132,11 @@ def view_position_grid(
         print(f"\nExtracting positions from all frames...")
     
     total_frames = 0
+    
     for i, file in enumerate(all_files):
         try:
             # Load without averaging to get frame count
-            swing = h5File_SWING(file=file, mean=False)
+            swing = h5File_SWING(file=file, frame=0)
             nb_frames = swing.nb_frames
             
             # Start and end positions
@@ -226,6 +227,10 @@ def view_position_grid(
                 markeredgewidth=0,
                 linestyle='none')
         
+        #plt.plot(positions_x[2], positions_z[2*nb_frames+3], marker='o', color='red', markersize=5, linestyle='none', label='Example points')
+        #plt.plot(positions_x[6], positions_z[6*nb_frames+8], marker='o', color='red', markersize=5, linestyle='none')
+        #plt.plot(positions_x[10], positions_z[10*nb_frames+14], marker='o', color='red', markersize=5, linestyle='none')
+        
         plt.title(f'Position Grid Mapping\n'
                   f'Reference: {swing_ref.samplename} (#{swing_ref.file_number})\n'
                   f'{stats["total_points"]} positions')
@@ -282,7 +287,7 @@ def sort_edf(file):
         raise ValueError("Format de fichier non reconnu")
 
     return int(match.group(1)), int(match.group(2))
-
+"""
 def _process_one_edf(
     i,
     file,
@@ -346,7 +351,49 @@ def _process_one_edf(
         row_data
     )
 
-def compute_nematic_order_assembly_SWING(
+def _process_one_edf_orientation(
+    i,
+    file,
+    reference_file,
+    k,
+    autosubstract,
+    mask,
+    qvalue,
+    threshold,
+    
+):
+    proc = SAXSProcessor(
+        file=file,
+        reference_file=reference_file,
+        k=k,
+        autosubstract=autosubstract,
+        mask=mask,
+        instrument='LGC'
+    )
+
+    orientation = proc.find_main_orientation(qvalue=qvalue, threshold=threshold)
+        
+
+    raw_data = {
+        'File number': proc.file_number,
+        'samplename': proc.samplename,
+        'B (mT)': proc.B,
+        'x (mm)': proc.x,
+        'z (mm)': proc.z,
+        'orientation (°)': orientation,
+        
+    }
+
+    
+    return (
+        i,
+        proc.x,
+        proc.z,
+        orientation,        
+        raw_data
+    )
+
+def compute_nematic_order_assembly_SWING_old(
     h5path,
     prefix='lacroix',
     reference_file=None,
@@ -364,9 +411,9 @@ def compute_nematic_order_assembly_SWING(
     verbose=True
 ):
     """
-    SAXS linescan processing with nematic order parameter computation
-    (PARALLELIZED VERSION)
-    """
+    #SAXS linescan processing with nematic order parameter computation
+    #(PARALLELIZED VERSION)
+"""
 
     def log_step(step, total, message):
         clear_output(wait=True)
@@ -387,7 +434,7 @@ def compute_nematic_order_assembly_SWING(
     os.makedirs(edfpath, exist_ok=True)
 
     for h5file in tqdm(h5_filelist, desc="Converting h5 → EDF"):
-        SWING_file = h5File_SWING(h5file, mean=False)
+        SWING_file = h5File_SWING(h5file, frame = 0)
         SWING_file.convert2edf(outputdir=edfpath)
 
     # === STEP 3: geometry
@@ -523,8 +570,264 @@ def compute_nematic_order_assembly_SWING(
     plt.show()
 
     return x_2d, z_2d, orientation_2d, S_2d, R2_2d
+"""
+
+def _process_one_frame(
+    i,
+    h5file,
+    frame_index,
+    reference_file,
+    k,
+    autosubstract,
+    mask,
+    qvalue,
+    threshold,
+    radius,
+    L,
+    radius_pd,
+    L_pd,
+    apply_mirror,
+    verbose
+):
+    """
+    Traite une seule frame d'un fichier h5 SWING (plus besoin de passer par l'EDF).
+    """
+    proc = SAXSProcessor(
+        file=h5file,
+        reference_file=reference_file,
+        k=k,
+        autosubstract=autosubstract,
+        mask=mask,
+        instrument='SWING',
+        frame=frame_index
+    )
+
+    # Position moteur (x, z) de cette frame, calculée directement à partir du
+    # reader h5, sans passer par le header EDF intermédiaire.
+    # (formule identique à celle utilisée précédemment dans h5File_SWING.convert2edf)
+    swing = proc.file  # instance h5File_SWING sous-jacente
+    x_start = np.atleast_1d(swing.position_x_start)[0]
+    z_start = np.atleast_1d(swing.position_z_start)[0]
+    step_x = np.atleast_1d(swing.step_x)[0]
+    step_z = np.atleast_1d(swing.step_z)[0]
+
+    x = float(x_start + frame_index * step_x)
+    z = float(z_start + frame_index * step_z)
+    proc.x = x
+    proc.z = z
+
+    S, orientation, results = compute_nematic_parameter(
+        processor=proc,
+        qvalue=qvalue,
+        threshold=threshold,
+        radius=radius,
+        L=L,
+        radius_pd=radius_pd,
+        L_pd=L_pd,
+        plot=False,               # <<< IMPORTANT
+        apply_mirror=apply_mirror,
+        verbose=verbose
+    )
+
+    row_data = {
+        'Line file number': swing.file_number,
+        'Frame index': frame_index,
+        'samplename': proc.samplename,
+        'B (mT)': proc.B,
+        'x (mm)': x,
+        'z (mm)': z,
+        'orientation (°)': orientation,
+        'S': S,
+        'R2': results['R2']
+    }
+
+    for key, value in results.items():
+        if key != 'I_model':
+            row_data[key] = value
+
+    return (
+        i,
+        x,
+        z,
+        orientation,
+        S,
+        results['R2'],
+        row_data
+    )
 
 
+def compute_nematic_order_assembly_SWING(
+    h5path,
+    prefix='lacroix',
+    reference_file=None,
+    k=1,
+    autosubstract=True,
+    mask=None,
+    qvalue=0.034,
+    threshold=0.05,
+    radius=78,
+    L=840,
+    radius_pd=0.3,
+    L_pd=0.75,
+    plot=False,
+    apply_mirror=None,
+    verbose=True
+):
+    """
+    SAXS linescan processing with nematic order parameter computation
+    (PARALLELIZED VERSION - traitement direct des frames h5, sans conversion EDF)
+    """
+
+    def log_step(step, total, message):
+        clear_output(wait=True)
+        display(Markdown(f"### Step {step}/{total}\n**{message}**"))
+
+    print("⚠️ WARNING: This function assumes the data correspond to a linescan.")
+
+    # === STEP 1: h5 files
+    log_step(1, 5, "Searching and sorting h5 files")
+    h5_filelist = sorted(
+        glob.glob(os.path.join(h5path, '*.h5')),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
+
+    # === STEP 2: scan geometry + task list
+    log_step(2, 5, "Determining scan geometry and building task list")
+    number_of_lines = len(h5_filelist)
+
+    # On instancie juste le premier fichier (frame=0, pas 'mean') pour
+    # récupérer le nombre de frames par ligne depuis les métadonnées h5.
+    first_file = h5File_SWING(h5_filelist[0], frame=0)
+    number_of_columns = first_file.nb_frames
+
+    # Liste des tâches (i, fichier, indice de frame), ordonnée en "line-major"
+    # pour rester cohérente avec le reshape(number_of_lines, number_of_columns) plus bas.
+    tasks = []
+    idx = 0
+    for h5file in h5_filelist:
+        for frame_index in range(number_of_columns):
+            tasks.append((idx, h5file, frame_index))
+            idx += 1
+
+    nfiles = len(tasks)
+
+    # === STEP 3: parallel nematic computation (directement sur les frames h5)
+    log_step(3, 5, "Computing nematic order parameter (parallel, direct h5 frames)")
+
+    x_array = np.zeros(nfiles)
+    z_array = np.zeros(nfiles)
+    orientation_array = np.zeros(nfiles)
+    S_array = np.zeros(nfiles)
+    R2_array = np.zeros(nfiles)
+    data_list = []
+
+    n_jobs = max(1, multiprocessing.cpu_count() - 1)
+
+    results = Parallel(
+        n_jobs=n_jobs,
+        backend="loky",
+        verbose=10
+    )(
+        delayed(_process_one_frame)(
+            i,
+            h5file,
+            frame_index,
+            reference_file,
+            k,
+            autosubstract,
+            mask,
+            qvalue,
+            threshold,
+            radius,
+            L,
+            radius_pd,
+            L_pd,
+            apply_mirror,
+            verbose
+        )
+        for i, h5file, frame_index in tasks
+    )
+
+    for i, x, z, orientation, S, R2, row_data in results:
+        x_array[i] = x
+        z_array[i] = z
+        orientation_array[i] = orientation
+        S_array[i] = S
+        R2_array[i] = R2
+        data_list.append(row_data)
+
+    # === STEP 4: CSV export
+    log_step(4, 5, "Exporting results to CSV")
+    df = pd.DataFrame(data_list)
+
+    outputpath = os.path.join(h5path, 'nematic_processing_results')
+    os.makedirs(outputpath, exist_ok=True)
+
+    csv_filename = os.path.join(outputpath, 'nematic_order_results.csv')
+    df.to_csv(csv_filename, index=False)
+
+    # === STEP 5: final map
+    log_step(5, 5, "Generating final nematic order map")
+
+    orientation_2d = orientation_array.reshape(number_of_lines, number_of_columns)
+    S_2d = S_array.reshape(number_of_lines, number_of_columns)
+    x_2d = x_array.reshape(number_of_lines, number_of_columns)
+    z_2d = z_array.reshape(number_of_lines, number_of_columns)
+    R2_2d = R2_array.reshape(number_of_lines, number_of_columns)
+
+    # Points originaux
+    x_orig = x_2d.flatten()
+    z_orig = z_2d.flatten()
+
+    # Étendre légèrement les limites (5% de marge)
+    x_margin = (x_orig.max() - x_orig.min()) * 0.05
+    z_margin = (z_orig.max() - z_orig.min()) * 0.05
+
+    x_min_ext = x_orig.min() - x_margin
+    x_max_ext = x_orig.max() + x_margin
+    z_min_ext = z_orig.min() - z_margin
+    z_max_ext = z_orig.max() + z_margin
+
+    # Grille interpolée (2x plus fine)
+    x_interp = np.linspace(x_min_ext, x_max_ext, number_of_columns * 2)
+    z_interp = np.linspace(z_min_ext, z_max_ext, number_of_lines * 2)
+    x_grid, z_grid = np.meshgrid(x_interp, z_interp)
+
+    # Interpoler S_2d (seulement les points valides)
+    points = np.column_stack((x_orig, z_orig))
+    values_S = S_2d.flatten()
+
+    S_interp = griddata(points, values_S, (x_grid, z_grid), method='linear')
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    im = ax.imshow(
+        S_2d,
+        extent=[x_min_ext, x_max_ext, z_min_ext, z_max_ext],
+        origin='lower',
+        aspect='auto',
+        cmap='jet',
+        interpolation='bicubic'
+    )
+
+    u = np.cos(np.radians(orientation_2d))
+    v = np.sin(np.radians(orientation_2d))
+
+    ax.quiver(x_2d, z_2d, u, v, color='black', scale=15, width=0.005)
+
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('S', rotation=270, labelpad=20)
+
+    ax.set_xlabel('X position (mm)')
+    ax.set_ylabel('Z position (mm)')
+    ax.set_title('Nematic order parameter map')
+    ax.invert_yaxis()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(outputpath, 'nematic_orientation_map.png'))
+    plt.show()
+
+    return x_2d, z_2d, orientation_2d, S_2d, R2_2d
 
 
 def plot_nematic_order_map(x_2d, z_2d, orientation_2d, S_2d, R2_2d, R2_threshold=0.9, outputpath=None):
@@ -625,6 +928,400 @@ def plot_nematic_order_map(x_2d, z_2d, orientation_2d, S_2d, R2_2d, R2_threshold
     plt.savefig(figname, dpi=300, bbox_inches='tight')
     plt.show()
 
+def _process_one_frame_orientation(
+    i,
+    h5file,
+    frame_index,
+    reference_file,
+    k,
+    autosubstract,
+    mask,
+    qvalue,
+    threshold,
+):
+    """
+    Traite une seule frame d'un fichier h5 SWING (plus besoin de passer par l'EDF).
+    """
+    proc = SAXSProcessor(
+        file=h5file,
+        reference_file=reference_file,
+        k=k,
+        autosubstract=autosubstract,
+        mask=mask,
+        instrument='SWING',
+        frame=frame_index
+    )
+
+    # Position moteur (x, z) de cette frame, calculée directement à partir du
+    # reader h5 (même formule que celle utilisée précédemment dans h5File_SWING.convert2edf)
+    swing = proc.file  # instance h5File_SWING sous-jacente
+    x_start = np.atleast_1d(swing.position_x_start)[0]
+    z_start = np.atleast_1d(swing.position_z_start)[0]
+    step_x = np.atleast_1d(swing.step_x)[0]
+    step_z = np.atleast_1d(swing.step_z)[0]
+
+    x = float(x_start + frame_index * step_x)
+    z = float(z_start + frame_index * step_z)
+    proc.x = x
+    proc.z = z
+
+    orientation = proc.find_main_orientation(qvalue=qvalue, threshold=threshold)
+
+    raw_data = {
+        'Line file number': swing.file_number,
+        'Frame index': frame_index,
+        'samplename': proc.samplename,
+        'B (mT)': proc.B,
+        'x (mm)': x,
+        'z (mm)': z,
+        'orientation (°)': orientation,
+    }
+
+    return (
+        i,
+        x,
+        z,
+        orientation,
+        raw_data
+    )
+
+
+def compute_orientation_map_SWING(
+    h5path,
+    prefix='lacroix',
+    reference_file=None,
+    k=1,
+    autosubstract=True,
+    mask=None,
+    qvalue=0.034,
+    threshold=0.05):
+    """
+    SAXS linescan processing with nematic orientation computation
+    (PARALLELIZED VERSION - traitement direct des frames h5, sans conversion EDF)
+    """
+
+    def log_step(step, total, message):
+        clear_output(wait=True)
+        display(Markdown(f"### Step {step}/{total}\n**{message}**"))
+
+    print("⚠️ WARNING: This function assumes the data correspond to a linescan.")
+
+    # === STEP 1: h5 files
+    log_step(1, 5, "Searching and sorting h5 files")
+    h5_filelist = sorted(
+        glob.glob(os.path.join(h5path, '*.h5')),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
+
+    # === STEP 2: scan geometry + task list
+    log_step(2, 5, "Determining scan geometry and building task list")
+    number_of_lines = len(h5_filelist)
+
+    # On instancie juste le premier fichier (frame=0, pas 'mean') pour
+    # récupérer le nombre de frames par ligne depuis les métadonnées h5.
+    first_file = h5File_SWING(h5_filelist[0], frame=0)
+    number_of_columns = first_file.nb_frames
+
+    # Liste des tâches (i, fichier, indice de frame), ordonnée en "line-major"
+    # pour rester cohérente avec le reshape(number_of_lines, number_of_columns) plus bas.
+    tasks = []
+    idx = 0
+    for h5file in h5_filelist:
+        for frame_index in range(number_of_columns):
+            tasks.append((idx, h5file, frame_index))
+            idx += 1
+
+    nfiles = len(tasks)
+
+    # === STEP 3: parallel orientation computation (directement sur les frames h5)
+    log_step(3, 5, "Computing nematic orientation (parallel, direct h5 frames)")
+
+    x_array = np.zeros(nfiles)
+    z_array = np.zeros(nfiles)
+    orientation_array = np.zeros(nfiles)
+    data_list = []
+
+    n_jobs = max(1, multiprocessing.cpu_count() - 1)
+
+    results = Parallel(
+        n_jobs=n_jobs,
+        backend="loky",
+        verbose=10
+    )(
+        delayed(_process_one_frame_orientation)(
+            i,
+            h5file,
+            frame_index,
+            reference_file,
+            k,
+            autosubstract,
+            mask,
+            qvalue,
+            threshold
+        )
+        for i, h5file, frame_index in tasks
+    )
+
+    for i, x, z, orientation, row_data in results:
+        x_array[i] = x
+        z_array[i] = z
+        orientation_array[i] = orientation
+        data_list.append(row_data)
+
+    # === STEP 4: CSV export
+    log_step(4, 5, "Exporting results to CSV")
+    df = pd.DataFrame(data_list)
+
+    outputpath = os.path.join(h5path, 'orientation_map_results')
+    os.makedirs(outputpath, exist_ok=True)
+
+    csv_filename = os.path.join(outputpath, 'orientation_map_results.csv')
+    df.to_csv(csv_filename, index=False)
+
+    # === STEP 5: final map
+    log_step(5, 5, "Generating final nematic order map")
+
+    orientation_2d = orientation_array.reshape(number_of_lines, number_of_columns)
+
+    x_2d = x_array.reshape(number_of_lines, number_of_columns)
+    z_2d = z_array.reshape(number_of_lines, number_of_columns)
+
+    # Points originaux
+    x_orig = x_2d.flatten()
+    z_orig = z_2d.flatten()
+
+    # Étendre légèrement les limites (5% de marge)
+    x_margin = (x_orig.max() - x_orig.min()) * 0.05
+    z_margin = (z_orig.max() - z_orig.min()) * 0.05
+
+    x_min_ext = x_orig.min() - x_margin
+    x_max_ext = x_orig.max() + x_margin
+    z_min_ext = z_orig.min() - z_margin
+    z_max_ext = z_orig.max() + z_margin
+
+    # Grille interpolée (2x plus fine)
+    x_interp = np.linspace(x_min_ext, x_max_ext, number_of_columns * 2)
+    z_interp = np.linspace(z_min_ext, z_max_ext, number_of_lines * 2)
+    x_grid, z_grid = np.meshgrid(x_interp, z_interp)
+
+    # Points originaux (conservé pour cohérence avec la version d'origine,
+    # même si non utilisé plus loin dans le tracé)
+    points = np.column_stack((x_orig, z_orig))
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    u = np.cos(np.radians(orientation_2d))
+    v = np.sin(np.radians(orientation_2d))
+
+    ax.quiver(x_2d, z_2d, u, v, color='black', scale=15, width=0.005)
+    ax.set_xlabel('X position (mm)')
+    ax.set_ylabel('Z position (mm)')
+    ax.set_title('Nematic order parameter map')
+    ax.invert_yaxis()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(outputpath, 'nematic_orientation_map.png'))
+    plt.show()
+
+    return x_2d, z_2d, orientation_2d
+
+"""
+def compute_orientation_map_SWING(
+    h5path,
+    prefix='lacroix',
+    reference_file=None,
+    k=1,
+    autosubstract=True,
+    mask=None,
+    qvalue=0.034,
+    threshold=0.05):
+    """
+    #SAXS linescan processing with nematic order parameter computation
+    #(PARALLELIZED VERSION)
+"""
+
+    def log_step(step, total, message):
+        clear_output(wait=True)
+        display(Markdown(f"### Step {step}/{total}\n**{message}**"))
+
+    print("⚠️ WARNING: This function assumes the data correspond to a linescan.")
+
+    # === STEP 1: h5 files
+    log_step(1, 7, "Searching and sorting h5 files")
+    h5_filelist = sorted(
+        glob.glob(os.path.join(h5path, '*.h5')),
+        key=lambda f: sort_h5(f, prefix=prefix)
+    )
+
+    # === STEP 2: h5 → EDF
+    log_step(2, 7, "Extracting frames and converting to EDF files")
+    edfpath = os.path.join(h5path, 'edf_files')
+    os.makedirs(edfpath, exist_ok=True)
+
+    for h5file in tqdm(h5_filelist, desc="Converting h5 → EDF"):
+        SWING_file = h5File_SWING(h5file, mean=False)
+        SWING_file.convert2edf(outputdir=edfpath)
+
+    # === STEP 3: geometry
+    log_step(3, 7, "Determining scan geometry")
+    number_of_lines = len(h5_filelist)
+    number_of_columns = SWING_file.nb_frames
+
+    # === STEP 4: EDF list
+    log_step(4, 7, "Building EDF file list")
+    edf_filelist = sorted(
+        glob.glob(os.path.join(edfpath, '*Img*.edf')),
+        key=sort_edf
+    )
+
+    # === STEP 5: parallel nematic computation
+    log_step(5, 7, "Computing nematic order parameter (parallel)")
+
+    nfiles = len(edf_filelist)
+
+    x_array = np.zeros(nfiles)
+    z_array = np.zeros(nfiles)
+    orientation_array = np.zeros(nfiles)
+    S_array = np.zeros(nfiles)
+    R2_array = np.zeros(nfiles)
+    data_list = []
+
+    n_jobs = max(1, multiprocessing.cpu_count() - 1)
+
+    results = Parallel(
+        n_jobs=n_jobs,
+        backend="loky",
+        verbose=10
+    )(
+        delayed(_process_one_edf_orientation)(
+            i,
+            file,
+            reference_file,
+            k,
+            autosubstract,
+            mask,
+            qvalue,
+            threshold)
+        for i, file in enumerate(edf_filelist)
+    )
+
+    for i, x, z, orientation, row_data in results:
+        x_array[i] = x
+        z_array[i] = z
+        orientation_array[i] = orientation
+        data_list.append(row_data)
+
+    # === STEP 6: CSV export
+    log_step(6, 7, "Exporting results to CSV")
+    df = pd.DataFrame(data_list)
+
+    outputpath = os.path.join(h5path, 'orientation_map_results')
+    os.makedirs(outputpath, exist_ok=True)
+
+    csv_filename = os.path.join(outputpath, 'orientation_map_results.csv')
+    df.to_csv(csv_filename, index=False)
+
+    # === STEP 7: final map
+    log_step(7, 7, "Generating final nematic order map")
+
+    orientation_2d = orientation_array.reshape(number_of_lines, number_of_columns)
+   
+    x_2d = x_array.reshape(number_of_lines, number_of_columns)
+    z_2d = z_array.reshape(number_of_lines, number_of_columns)
+    
+
+    # Points originaux
+    x_orig = x_2d.flatten()
+    z_orig = z_2d.flatten()
+    
+    # Étendre légèrement les limites (5% de marge)
+    x_margin = (x_orig.max() - x_orig.min()) * 0.05
+    z_margin = (z_orig.max() - z_orig.min()) * 0.05
+    
+    x_min_ext = x_orig.min() - x_margin
+    x_max_ext = x_orig.max() + x_margin
+    z_min_ext = z_orig.min() - z_margin
+    z_max_ext = z_orig.max() + z_margin
+    
+    # Grille interpolée (2x plus fine)
+    x_interp = np.linspace(x_min_ext, x_max_ext, number_of_columns * 2)
+    z_interp = np.linspace(z_min_ext, z_max_ext, number_of_lines * 2)
+    x_grid, z_grid = np.meshgrid(x_interp, z_interp)
+    
+    # Interpoler S_2d (seulement les points valides)
+    points = np.column_stack((x_orig, z_orig))
+    
+    
+     
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    
+    u = np.cos(np.radians(orientation_2d))
+    v = np.sin(np.radians(orientation_2d))
+
+    ax.quiver(x_2d, z_2d, u, v, color='black', scale=15, width=0.005)
+    ax.set_xlabel('X position (mm)')
+    ax.set_ylabel('Z position (mm)')
+    ax.set_title('Nematic order parameter map')
+    ax.invert_yaxis()
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(outputpath, 'nematic_orientation_map.png'))
+    plt.show()
+
+    return x_2d, z_2d, orientation_2d
+
+"""
+
+
+def plot_orientation_map(x_2d, z_2d, orientation_2d, outputpath=None, rotation=0):
+    """
+    Generate orientation map with quiver plot.
+
+    Parameters
+    ----------
+    rotation : int
+        Angle de rotation en degrés (multiple de 90 recommandé : 0, 90, 180, 270).
+        Fait tourner à la fois les positions et les vecteurs d'orientation.
+    """
+    if outputpath is None:
+        outputpath = os.path.join(os.getcwd(), 'nematic_processing_results')
+    os.makedirs(outputpath, exist_ok=True)
+
+    x_plot, z_plot = x_2d, z_2d
+    u = np.cos(np.radians(orientation_2d))
+    v = np.sin(np.radians(orientation_2d))
+
+    if rotation % 360 != 0:
+        theta = np.radians(rotation)
+        cos_t, sin_t = np.cos(theta), np.sin(theta)
+
+        # Rotation des positions
+        x_plot = x_2d * cos_t - z_2d * sin_t
+        z_plot = x_2d * sin_t + z_2d * cos_t
+
+        # Rotation des vecteurs (même transformation, sans translation)
+        u, v = u * cos_t - v * sin_t, u * sin_t + v * cos_t
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.quiver(
+        x_plot, z_plot, u, v,
+        color='black',
+        scale=15,
+        width=0.005,
+        alpha=0.8,
+        headwidth=3,
+        headlength=4
+    )
+    ax.set_xlabel('X position (mm)', fontsize=14)
+    ax.set_ylabel('Z position (mm)', fontsize=14)
+    ax.set_title('Orientation map', fontsize=16)
+    ax.invert_yaxis()
+    plt.tight_layout()
+
+    figname = os.path.join(outputpath, 'orientation_map.png')
+    plt.savefig(figname, dpi=300, bbox_inches='tight')
+    plt.show()
 
 
 def plot_from_csv(csvpath, R2_threshold=0.9):
@@ -716,7 +1413,7 @@ def view_position_grid_from_single_h5_map(
         print(f"File: {os.path.basename(h5file)}")
     
     # Load the h5 file
-    swing_file = h5File_SWING(file=h5file, mean=False)
+    swing_file = h5File_SWING(file=h5file, frame = 0)
     basler_ref = swing_file.basler_image
     
     # Get geometry: raw_data shape should be (nb_lines, nb_columns, height, width)
@@ -871,7 +1568,7 @@ def view_position_grid_from_single_h5_map(
 
 def plot_transmission_map_from_singleh5(h5file):
     """Generate transmission map from a single SWING h5 file (map)"""
-    SWING_file = h5File_SWING(h5file, mean=False)
+    SWING_file = h5File_SWING(h5file, frame = 0)
     SWING_file._extract_from_h5()
     SWING_file._extract_scatteringdata()
     nb_lines = SWING_file.raw_data.shape[0]
@@ -914,21 +1611,20 @@ def plot_transmission_map(h5path,prefix='lacroix'):
     )
 
     number_of_lines = len(h5_filelist)
-    number_of_columns = h5File_SWING(h5_filelist[0], mean=False).nb_frames
+    number_of_columns = h5File_SWING(h5_filelist[0], frame=0).nb_frames
 
     x_array = np.zeros((number_of_lines, number_of_columns))
     z_array = np.zeros((number_of_lines, number_of_columns))
     transmission_array = np.zeros((number_of_lines, number_of_columns))
 
     for i, h5file in enumerate(tqdm(h5_filelist, desc="Extracting transmission data")):
-        SWING_file = h5File_SWING(h5file, mean=False)
-        SWING_file._extract_from_h5()
-        SWING_file._extract_scatteringdata()
-
-        for j in range(SWING_file.nb_frames):
+        for j in range(number_of_columns):
+            SWING_file = h5File_SWING(h5file, frame =j)
+            #SWING_file._extract_from_h5()
+            #SWING_file._extract_scatteringdata()        
             x_array[i, j] = SWING_file.position_x_start + j * SWING_file.step_x
             z_array[i, j] = SWING_file.position_z_start
-            transmission_array[i, j] = SWING_file.transmission[j]
+            transmission_array[i, j] = SWING_file.transmission
     
     # Plotting
     fig, ax = plt.subplots(figsize=(10, 8))
@@ -1006,7 +1702,8 @@ def average_h5_intensity(
                              reference_file = reference_file,
                              k = k,
                              autosubstract = autosubstract,
-                             mask = mask,                          
+                             mask = mask, 
+                             frame = 'mean'                         
                              )
         total_intensity += proc.data
     # 3. Calculate mean intensity
@@ -1093,8 +1790,6 @@ def average_h5_processor(
     return proc
 
 
-
-
 def compute_nematic_parameter_linescan_SWING(
     h5file,
     reference_file=None,
@@ -1112,6 +1807,165 @@ def compute_nematic_parameter_linescan_SWING(
     verbose=True
 ):
     """
+    SAXS linescan processing with nematic order parameter computation for a single h5 file
+    (PARALLELIZED VERSION - traitement direct des frames h5, sans conversion EDF)
+
+    Nécessite _process_one_frame (définie dans compute_nematic_order_assembly_SWING).
+
+    Parameters
+    ----------
+    h5file : str
+        Path to the single h5 file containing the linescan data
+    ... (autres paramètres identiques à compute_nematic_order_assembly_SWING)
+
+    Returns
+    -------
+    x_array : ndarray
+        X positions
+    z_array : ndarray
+        Z positions (constant for a linescan)
+    orientation_array : ndarray
+        Orientation angles
+    S_array : ndarray
+        Nematic order parameters
+    R2_array : ndarray
+        R² values
+    df : DataFrame
+        Complete results as DataFrame
+    """
+
+    def log_step(step, total, message):
+        clear_output(wait=True)
+        display(Markdown(f"### Step {step}/{total}\n**{message}**"))
+
+    print("⚠️ WARNING: Processing single linescan file")
+
+    # === STEP 1: Vérifier le fichier h5
+    log_step(1, 4, "Checking h5 file")
+    if not os.path.exists(h5file):
+        raise FileNotFoundError(f"File not found: {h5file}")
+
+    h5dir = os.path.dirname(h5file)
+
+    # === STEP 2: Geometry + task list (1 ligne × N colonnes)
+    log_step(2, 4, "Determining scan geometry and building task list")
+
+    # On instancie le fichier (frame=0, pas 'mean') pour récupérer le
+    # nombre de frames depuis les métadonnées h5.
+    first_file = h5File_SWING(h5file, frame=0)
+    number_of_columns = first_file.nb_frames
+    number_of_lines = 1
+
+    tasks = [(i, h5file, i) for i in range(number_of_columns)]
+    nfiles = len(tasks)
+
+    # === STEP 3: Parallel nematic computation (directement sur les frames h5)
+    log_step(3, 4, "Computing nematic order parameter (parallel, direct h5 frames)")
+
+    x_array = np.zeros(nfiles)
+    z_array = np.zeros(nfiles)
+    orientation_array = np.zeros(nfiles)
+    S_array = np.zeros(nfiles)
+    R2_array = np.zeros(nfiles)
+    data_list = []
+
+    n_jobs = max(1, multiprocessing.cpu_count() - 1)
+
+    results = Parallel(
+        n_jobs=n_jobs,
+        backend="loky",
+        verbose=10
+    )(
+        delayed(_process_one_frame)(
+            i,
+            h5f,
+            frame_index,
+            reference_file,
+            k,
+            autosubstract,
+            mask,
+            qvalue,
+            threshold,
+            radius,
+            L,
+            radius_pd,
+            L_pd,
+            apply_mirror,
+            verbose
+        )
+        for i, h5f, frame_index in tasks
+    )
+
+    for i, x, z, orientation, S, R2, row_data in results:
+        x_array[i] = x
+        z_array[i] = z
+        orientation_array[i] = orientation
+        S_array[i] = S
+        R2_array[i] = R2
+        data_list.append(row_data)
+
+    # === STEP 4: CSV export et visualisation
+    log_step(4, 4, "Exporting results and generating plots")
+    df = pd.DataFrame(data_list)
+
+    outputpath = os.path.join(h5dir, 'nematic_linescan_results')
+    os.makedirs(outputpath, exist_ok=True)
+
+    csv_filename = os.path.join(outputpath, 'nematic_order_linescan.csv')
+    df.to_csv(csv_filename, index=False)
+
+    if plot:
+        # Plot simple: S(x) avec flèches d'orientation
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        # Tracer S(x)
+        ax.plot(x_array, S_array, 'o-', linewidth=2, markersize=8, color='blue', label='S')
+
+        # Ajouter les flèches d'orientation à chaque point
+        u = np.cos(np.radians(orientation_array))
+        v = np.sin(np.radians(orientation_array))
+
+        # Échelle des flèches proportionnelle à la plage de S
+        S_range = S_array.max() - S_array.min()
+        arrow_scale = S_range * 0.15 if S_range > 0 else 0.1
+
+        ax.quiver(x_array, S_array, u, v,
+                  color='black', scale=15, width=0.005, alpha=0.8, headwidth=3, headlength=4, label='Orientation')
+
+        ax.set_xlabel('X position (mm)', fontsize=12)
+        ax.set_ylabel('Nematic order parameter S', fontsize=12)
+        ax.set_title('Nematic order parameter and orientation along linescan', fontsize=14)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(outputpath, 'nematic_linescan_profile.png'), dpi=150)
+        plt.show()
+
+    print(f"\n✓ Processing complete!")
+    print(f"  - Results saved to: {csv_filename}")
+    print(f"  - Number of points: {nfiles}")
+
+    return x_array, z_array, orientation_array, S_array, R2_array, df
+"""
+def compute_nematic_parameter_linescan_SWING_old(
+    h5file,
+    reference_file=None,
+    k=1,
+    autosubstract=True,
+    mask=None,
+    qvalue=0.034,
+    threshold=0.05,
+    radius=78,
+    L=840,
+    radius_pd=0.3,
+    L_pd=0.75,
+    plot=True,
+    apply_mirror=None,
+    verbose=True
+):
+    """
+"""
     SAXS linescan processing with nematic order parameter computation for a single h5 file
     (PARALLELIZED VERSION)
     
@@ -1136,7 +1990,7 @@ def compute_nematic_parameter_linescan_SWING(
     df : DataFrame
         Complete results as DataFrame
     """
-    
+"""   
     def log_step(step, total, message):
         clear_output(wait=True)
         display(Markdown(f"### Step {step}/{total}\n**{message}**"))
@@ -1258,7 +2112,7 @@ def compute_nematic_parameter_linescan_SWING(
     print(f"  - Number of points: {nfiles}")
     
     return x_array, z_array, orientation_array, S_array, R2_array, df
-
+"""
 
 def detect_peaks_hybrid_interactive(proc,
                                     nb_peaks_init=6,
@@ -1836,7 +2690,7 @@ def extract_relevant_azimuthal_profiles(proc,
         If True, allows manual input of q values instead of automatic peak detection (default: False)
     """
     # Exécuter les 3 étapes
-    peaklist = detect_peaks_interactive(proc, nb_peaks, qmin, qmax, manual_input)
+    peaklist = detect_peaks_hybrid_interactive(proc, nb_peaks, qmin, qmax, manual_input)
     extract_and_plot_azimuthal_profiles(proc, peaklist, threshold, apply_mirror, output_dir)
     plot_2d_with_peaks(proc, peaklist)
 

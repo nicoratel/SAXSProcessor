@@ -11,7 +11,7 @@ from scipy.interpolate import interp1d, griddata
 import pandas as pd
 
 # PyFAI imports
-from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
+from pyFAI.integrator.azimuthal import AzimuthalIntegrator
 import pyFAI.detectors
 
 

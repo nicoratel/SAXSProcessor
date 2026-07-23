@@ -93,9 +93,20 @@ class EdfFile:
 class h5File_ID02:
     """Handler for HDF5 files from ESRF-ID02 beamline"""
     
-    def __init__(self, file):
+    def __init__(self, file, frame = 'mean'):
+        """
+        file: str
+            Path to h5 file
+        frame: int or 'mean'
+            frame index or average if 'mean'
+        """
         self.file = file
         self.file_number = self._extract_number()
+        if frame == 'mean':
+            self.mean = True
+        else:
+            self.mean = False
+            self.frame = frame
                
         if file is None:
             raise ValueError("Please specify a data file path")
@@ -109,7 +120,10 @@ class h5File_ID02:
                 # Retrieve image data
                 target = group + '/measurement/data'
                 data = np.array(f[target])
-                self.data = np.mean(data, axis=0)  # Average over frames
+                if self.mean:
+                    self.data = np.mean(data, axis=0)  # Average over frames
+                else:
+                    self.data = data[frame]
                 shape = np.shape(self.data)
                 self.num_pixel_x = shape[0]
                 self.num_pixel_z = shape[1]
@@ -144,6 +158,10 @@ class h5File_ID02:
                 elif len(shape) == 3:
                     self.num_pixel_x = shape[1]
                     self.num_pixel_z = shape[2]
+                    if self.mean:
+                        self.data = np.mean(self.data, axis=0)
+                    else:
+                        self.data = self.data[self.frame]
                 else:
                     raise ValueError(f"Data in file {self.file} should have 2 or 3 dimensions")
                 
@@ -189,10 +207,22 @@ class h5File_ID02:
 class h5File_SWING:
     """Handler for HDF5 files from SOLEIL-SWING beamline"""
     
-    def __init__(self, file: str, mean=True, force_linescan = False):
+    def __init__(self, file: str, frame = 'mean', force_linescan = False):
+        """
+        file: str
+            path to h5 file
+        frame: int or 'mean'
+            frame index or average data if 'mean'
+        
+
+        """
         self.file = file
         self.file_number = self._extract_number()
-        self.mean = mean    
+        self.frame = frame
+        if self.frame == 'mean':
+            self.mean = True
+        else:
+            self.mean = False    
         if not os.path.exists(file):
             raise FileNotFoundError(f"File {file} not found.")
           
@@ -248,7 +278,9 @@ class h5File_SWING:
             # Retrive sample transmission
             self.transmission = f[group + '/sample_info/sample_transmission'][()] # transmission array for line scans
             if self.mean:
-                self.transmission = np.mean(self.transmission)     
+                self.transmission = np.mean(self.transmission)  
+            else:
+                self.transmission = f[group + '/sample_info/sample_transmission'][()][self.frame]   
            
     def _extract_magnetic_field(self):
         match = re.search(r'(\d+)\s*mT', self.samplename)
@@ -265,11 +297,14 @@ class h5File_SWING:
                         
         print(f"Raw data shape: {data_raw.shape}")
         if (len(data_raw.shape)==3) & self.mean:
+            print('WARNING: SAXSProcessor uses averaged data')
             data = np.mean(data_raw, axis=0) # average over lines
         elif (len(data_raw.shape)==4) & self.mean:
+            print('WARNING: SAXSProcessor uses averaged data')
             data = np.mean(np.mean(data_raw, axis=0), axis=0) # average over lines & columns scans
         else:
-            data = data_raw          
+            print(f'SAXSProcessor used data of frame #{self.frame}/{self.nb_frames} total frames')
+            data = data_raw[self.frame]          
         
         self.num_pixel_x = data.shape[-2]
         self.num_pixel_z = data.shape[-1]

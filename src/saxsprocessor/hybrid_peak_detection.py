@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter, find_peaks
 from scipy.ndimage import gaussian_filter1d
-from saxs_analysis import SAXSExperiment
+from .saxs_analysis import SAXSExperiment
 
 
 def detect_peaks_hybrid(q, I, dI=None,

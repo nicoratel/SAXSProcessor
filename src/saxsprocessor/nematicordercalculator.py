@@ -15,7 +15,7 @@ from scipy.signal import savgol_filter
 import pandas as pd
 
 # PyFAI imports
-from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
+from pyFAI.integrator.azimuthal import AzimuthalIntegrator
 import pyFAI.detectors
 
 # SasModels imports (optional)
@@ -28,12 +28,12 @@ except ImportError:
     SASMODELS_AVAILABLE = False
     print("Warning: sasmodels not available. Form factor calculations will be disabled.")
 try:
-    from waxsprocessor import WAXSProcessor
+    from .waxsprocessor import WAXSProcessor
     WAXS=True
 except ImportError:
     WAXS=False
 try:
-    from saxsprocessor import SAXSProcessor
+    from .saxsprocessor import SAXSProcessor
     SAXS=True
 except ImportError:
     SAXS= False
