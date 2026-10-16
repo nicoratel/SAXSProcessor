@@ -15,7 +15,10 @@ from scipy.signal import savgol_filter
 import pandas as pd
 
 # PyFAI imports
-from pyFAI.integrator.azimuthal import AzimuthalIntegrator
+try:
+    from pyFAI.integrator.azimuthal import AzimuthalIntegrator
+except ModuleNotFoundError:
+    from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
 import pyFAI.detectors
 
 # SasModels imports (optional)
@@ -459,47 +462,42 @@ class NematicOrderCalculator:
                     print(f"{key}: {value}")
         return results
     
+    
+    
     @staticmethod
-    def mirror_profile(theta_exp, I_exp, center=180):
+    def mirror_profile(theta_exp, I_exp):
         """
-        Remplit les trous dans le profil azimuthal avec la symétrie miroir.
+        Remplit les trous dans le profil azimutal avec la symétrie de rotation 180°.
+        Un pic observé à θ génère un pic à θ + 180° (ex : -89° -> 91°).
         Ne duplique que les données manquantes, pas l'intégralité du profil.
         """
-        theta_exp = np.array(theta_exp)
-        I_exp = np.array(I_exp)
-        
-        # Mapper les angles dans [-180, 180]
+        theta_exp = np.asarray(theta_exp, dtype=float)
+        I_exp = np.asarray(I_exp, dtype=float)
+
+        # Mapper les angles dans [-180, 180[
         theta_norm = ((theta_exp + 180) % 360) - 180
-        
-        # Créer une grille dense pour déterminer les trous
-        theta_grid = np.linspace(-180, 180, 361)
-        I_grid = np.full_like(theta_grid, np.nan)
-        
-        # Placer les données expérimentales
+
+        # Grille de 1° (360 points, sans doublon -180/180)
+        n = 360
+        theta_grid = np.linspace(-180, 180, n, endpoint=False)
+        I_grid = np.full(n, np.nan)
+
+        # Placer les données expérimentales (on garde la valeur la plus forte)
         for t, I in zip(theta_norm, I_exp):
-            idx = np.argmin(np.abs(theta_grid - t))
-            if np.isnan(I_grid[idx]) or I > I_grid[idx]:  # Prendre la valeur la plus forte
+            idx = int(np.argmin(np.abs(theta_grid - t)))
+            if np.isnan(I_grid[idx]) or I > I_grid[idx]:
                 I_grid[idx] = I
-        
-        # Identifier les trous (NaN)
+
+        # Rotation de 180° = décalage de n/2 indices sur la grille
+        I_rot = np.roll(I_grid, n // 2)
+
+        # Remplir uniquement les trous avec la valeur tournée
         holes = np.isnan(I_grid)
-        
-        # Pour chaque trou, essayer de le remplir avec le symétrique
-        for i in np.where(holes)[0]:
-            theta_hole = theta_grid[i]
-            theta_mirror = (2*center - theta_hole) % 360
-            theta_mirror = ((theta_mirror + 180) % 360) - 180
-            
-            # Trouver l'indice le plus proche du symétrique
-            idx_mirror = np.argmin(np.abs(theta_grid - theta_mirror))
-            
-            if not np.isnan(I_grid[idx_mirror]):
-                I_grid[i] = I_grid[idx_mirror]
-        
-        # Retourner les données interpolées (ignorer les NaN restants)
+        I_grid[holes] = I_rot[holes]
+
+        # Retourner les données (en ignorant les NaN restants)
         mask_valid = ~np.isnan(I_grid)
         return theta_grid[mask_valid], I_grid[mask_valid]
-
 
 
 
