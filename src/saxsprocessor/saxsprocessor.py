@@ -5,6 +5,9 @@ from matplotlib.colors import LogNorm
 from scipy.signal import savgol_filter
 import fabio
 import os
+import numpy as np
+from scipy.optimize import curve_fit
+
 
 import math
 
@@ -15,7 +18,10 @@ from scipy.interpolate import interp1d, griddata
 import pandas as pd
 
 # PyFAI imports
-from pyFAI.integrator.azimuthal import AzimuthalIntegrator
+try:
+    from pyFAI.integrator.azimuthal import AzimuthalIntegrator
+except ModuleNotFoundError:
+    from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
 import pyFAI.detectors
 
 
@@ -805,35 +811,38 @@ class SAXSProcessor:
         return chi, I
     
     @staticmethod
-    def mirror_profile(theta_exp, I_exp, center=180):
+    def mirror_profile(theta_exp, I_exp):
         """
-        Génère un profil azimutal symétrique sans interpolation,
-        angles dans [-180°, 180°].
+        Fill the gaps of the azimuthal profile using the 180° rotation symmetry.
+        A peak seen at θ generates a peak at θ + 180° (e.g. -89° -> 91°).
+        Only missing data is duplicated, not the whole profile.
         """
-        theta_exp = np.array(theta_exp)
-        I_exp = np.array(I_exp)
-        """
-        # --- Détecter le pic principal ---
-        peaks, _ = find_peaks(I_exp, height=0)
-        if len(peaks) == 0:
-            raise ValueError("Aucun pic détecté.")
-        
-        main_peak = peaks[np.argmax(I_exp[peaks])]
-        x0 = theta_exp[main_peak]
-        """
-        # --- Calculer les angles miroir ---
-        theta_mirror_array = (2*center - theta_exp) % 360
-        I_mirror_array = I_exp.copy()  # intensité identique
-        
-        # --- Fusionner ---
-        theta_aug = np.concatenate([theta_exp, theta_mirror_array])
-        I_aug = np.concatenate([I_exp, I_mirror_array])
-        
-        # --- Mapper dans [-180, 180] et trier ---
-        theta_aug = ((theta_aug + 180) % 360) - 180
-        sort_idx = np.argsort(theta_aug)
-        
-        return theta_aug[sort_idx], I_aug[sort_idx]
+        theta_exp = np.asarray(theta_exp, dtype=float)
+        I_exp = np.asarray(I_exp, dtype=float)
+
+        # Map angles to [-180, 180[
+        theta_norm = ((theta_exp + 180) % 360) - 180
+
+        # 0.1° grid (3600 points, no -180/180 duplicate)
+        n = 3600
+        theta_grid = np.linspace(-180, 180, n, endpoint=False)
+        I_grid = np.full(n, np.nan)
+
+        # Place experimental data (keep the highest value)
+        for t, I in zip(theta_norm, I_exp):
+            idx = int(np.argmin(np.abs(theta_grid - t)))
+            if np.isnan(I_grid[idx]) or I > I_grid[idx]:
+                I_grid[idx] = I
+
+        # 180° rotation = shift by n/2 indices
+        I_rot = np.roll(I_grid, n // 2)
+
+        # Fill only the holes with the rotated value
+        holes = np.isnan(I_grid)
+        I_grid[holes] = I_rot[holes]
+
+        mask_valid = ~np.isnan(I_grid)
+        return theta_grid[mask_valid], I_grid[mask_valid]
 
     def extract_radial_profile(self, azimuth: float = 90, width: float = 10, save=True, output_dir=None):
         """
@@ -895,32 +904,63 @@ class SAXSProcessor:
         return q, I
     
 
+
+
+
     def find_main_orientation(self, qvalue=0.01, threshold=0.05):
         """
-        Determine the main orientation angle from the azimuthal intensity profile.
+        Estimate the dominant axial orientation by fitting a periodic
+        von Mises profile to the azimuthal intensity distribution.
 
-        The azimuthal profile at a given Q value is smoothed and the angle
-        corresponding to the maximum intensity is returned.
-
-        Parameters
-        ----------
-        qvalue : float, optional
-            Q value used for the azimuthal profile extraction.
-        threshold : float, optional
-            Relative width of the radial integration window around `qvalue`.
-
-        Returns
-        -------
-        angle : float
-            Azimuthal angle (degrees) corresponding to the maximum intensity.
+        Returns the orientation in [-90, 90).
         """
-        chi, I = self.extract_azimuthal_profile(qvalue=qvalue, threshold=threshold)
-        # apply savgol filter to I and remove zeros
-        I = savgol_filter(I,9,2)
-        # filtrer les points à intensité nulle
-        mask = (I > 0) & (chi > -90) & (chi < 90) 
-        chi = chi[mask]; I = I[mask]
-        angle = chi[np.argmax(I)]
-        return angle
-        #return min (angle, 180 + angle)
+        print('Estimating main orientation based on refined azimuthal profile at q = {:.3f} Å⁻¹...'.format(qvalue))
+        chi, I = self.extract_azimuthal_profile(
+            qvalue=qvalue, threshold=threshold
+        )
+
+        chi = np.asarray(chi, dtype=float)
+        I = np.asarray(I, dtype=float)
+
+        valid = np.isfinite(chi) & np.isfinite(I)
+        chi, I = chi[valid], I[valid]
+
+        if len(I) < 5:
+            return np.nan
+
+        order = np.argsort(chi)
+        chi, I = chi[order], I[order]
+
+        # Initial estimate: maximum of the measured profile
+        i_max = np.argmax(I)
+        angle0 = chi[i_max]
+
+        # Fit both peaks simultaneously using 180-degree periodicity
+        def model(angle, baseline, amplitude, kappa, center):
+            rad = np.deg2rad(2 * (angle - center))
+            return baseline + amplitude * np.exp(
+                kappa * (np.cos(rad) - 1)
+            )
+
+        baseline0 = np.percentile(I, 10)
+        amplitude0 = max(I.max() - baseline0, 1e-12)
+
+        try:
+            popt, _ = curve_fit(
+                model,
+                chi,
+                I,
+                p0=[baseline0, amplitude0, 2.0, angle0],
+                bounds=(
+                    [-np.inf, 0, 1e-4, angle0 - 90],
+                    [np.inf, np.inf, 100, angle0 + 90]
+                ),
+                maxfev=10000
+            )
+
+            angle = popt[3]
+            return float((angle + 90) % 180 - 90)
+
+        except (RuntimeError, ValueError):
+            return np.nan
         

@@ -168,7 +168,7 @@ def compute_nematic_parameter(
         processor = processor,
         verbose=verbose
         )
-    return results["S"], angle_folded, results
+    return results["S"], results["S_mean"], angle_folded, results
 
 
 """
